@@ -4,8 +4,12 @@
  * ============================================================ */
 
 :root {
-  /* 与 renderer.ts 中 GAP 保持一致的基线行距（px） */
+  /* 基线行距、译文额外高度、垂直偏移、字体 —— 运行时由 wallpaper.ts 的
+     属性回调覆盖为属性面板的调节值；默认值与 renderer.ts / body 保持一致 */
   --gap: 130px;
+  --trans-extra: 43px;
+  --offset-y: 0px;
+  --font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
 }
 
 * {
@@ -21,7 +25,7 @@ body {
   overflow: hidden;
   /* 基色：保证任意宽高比（含 21:9）下全屏填满，场景层淡出后露出底层 */
   background: #07070c;
-  font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-family);
   color: #fff;
   user-select: none;
   -webkit-user-select: none;
@@ -58,12 +62,12 @@ body {
   position: fixed;
   left: 50%;
   top: 50%;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, calc(-50% + var(--offset-y)));
   /* 宽度自适应：常规屏按视口比例，超宽屏（21:9）放宽到上限 */
   width: min(90vw, 2200px);
-  /* 7 行 + 译文补偿的额外高度（renderer.ts 的 TRANS_EXTRA 最多上下各 3 行带译文），
+  /* 7 行 + 译文补偿的额外高度（译文最多上下各 3 行带译文），
      避免带译文的上下行被 overflow 提前裁剪 */
-  height: calc(var(--gap) * 7 + 300px);
+  height: calc(var(--gap) * 7 + var(--trans-extra) * 7);
   overflow: hidden;
 }
 

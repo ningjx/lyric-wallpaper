@@ -6,22 +6,27 @@ import type { LyricsTarget } from "../player/MusicState";
 const HALF = 3;
 /** 窗口行数 */
 const WINDOW = HALF * 2 + 1;
-/** 行间距（px），由 CSS 变量 --gap 同步 */
-const GAP = 130;
-/**
- * 译文占用的额外垂直空间（px）。当某行带译文时，其译文会向下挤压下一行，
- * 因此把"该行到下一行"的间距多留出 TRANS_EXTRA，间距从译文底部算起。
- * 数值取当前行（最大字号 72px）译文的实际高度：0.42em*72*1.3 + 4px margin ≈ 43px。
- */
-const TRANS_EXTRA = 42;
-/** 各层级字号（tier 0 = 当前行，最大） */
-const FONT_SIZE = [72, 52, 38, 30];
+/** 默认当前行（最大）字号（px），可在 Wallpaper Engine 属性面板调节 */
+const DEFAULT_FONT_SIZE = 72;
+/** 默认行距（px），可在 Wallpaper Engine 属性面板调节 */
+const DEFAULT_GAP = 130;
+/** 各层级字号相对当前行（tier 0）的比例，调节字号时整体按此缩放 */
+const FONT_RATIOS = [1, 52 / 72, 38 / 72, 30 / 72];
 /** 各层级透明度 */
 const OPACITY = [1, 0.5, 0.26, 0.13];
 /** 各层级模糊 */
 const BLUR = [0, 1.2, 2.4, 3.6];
 /** 当前行光晕 */
 const GLOW = "0 0 36px rgba(255,255,255,0.5), 0 0 80px rgba(120,160,255,0.35)";
+
+/**
+ * 译文占用的额外垂直空间（px）。当某行带译文时，其译文会向下挤压下一行，
+ * 因此把"该行到下一行"的间距多留出这段，间距从译文底部算起。
+ * 译文为 0.42em、行高 1.3、再加 4px margin，故随字号缩放。
+ */
+export function transExtraFor(fontSize: number): number {
+  return Math.round(0.42 * fontSize * 1.3 + 4);
+}
 
 interface PoolItem {
   el: HTMLElement;
@@ -35,7 +40,7 @@ interface PoolItem {
  * 歌词渲染器：窗口行池 + 平滑滚动，当前句永远居中、字号最大。
  *
  * 行池原理：固定 N 个 DOM 元素，每个绑定一个"绝对歌词行索引"。
- * 当前行索引 cur 变化时，所有元素位置 = (index - cur) * GAP 平移一格，
+ * 当前行索引 cur 变化时，所有元素位置 = (index - cur) * gap 平移一格，
  * 文本不变（同一逻辑行），由 CSS transition 产生平滑滚动；
  * 滑出窗口的元素被回收并分配到窗口另一侧，瞬移到屏外再滑入。
  *
@@ -48,6 +53,10 @@ export class LyricsRenderer implements LyricsTarget {
   private cur = -1;
   private fallbackEl: HTMLElement | null = null;
   private fallbackVisible = false;
+  /** 当前行字号（px），由属性面板调节 */
+  private fontSize = DEFAULT_FONT_SIZE;
+  /** 行距（px），由属性面板调节 */
+  private gap = DEFAULT_GAP;
 
   constructor(container: HTMLElement) {
     for (let i = 0; i < WINDOW; i++) {
@@ -95,6 +104,18 @@ export class LyricsRenderer implements LyricsTarget {
     if (next !== this.cur) {
       this.advance(next);
     }
+  }
+
+  /** 应用字号/行距设置（Wallpaper Engine 属性面板调节），并平滑重排当前窗口 */
+  setLayout(fontSize: number, gap: number): void {
+    this.fontSize = fontSize;
+    this.gap = gap;
+    for (const it of this.pool) {
+      if (it.index < 0) continue;
+      const offset = it.index - this.cur;
+      this.applyItem(it, offset, tierOf(offset), false);
+    }
+    this.updateFallbackSize();
   }
 
   private resetPool(): void {
@@ -162,8 +183,8 @@ export class LyricsRenderer implements LyricsTarget {
     // 译文补偿：该行与当前行之间有多少带译文的行，就向下（上）平移多少，
     // 使译文不挤压下一行，间距从译文底部算起。
     const shift = this.transShift(it.index, this.cur);
-    el.style.transform = `translate(-50%, ${offset * GAP + shift}px)`;
-    el.style.fontSize = `${FONT_SIZE[tier]}px`;
+    el.style.transform = `translate(-50%, ${offset * this.gap + shift}px)`;
+    el.style.fontSize = `${this.fontSizeFor(tier)}px`;
     el.style.opacity = `${OPACITY[tier]}`;
     el.style.filter = tier === 0 ? "none" : `blur(${BLUR[tier]}px)`;
     el.style.textShadow = tier === 0 ? GLOW : "none";
@@ -182,7 +203,7 @@ export class LyricsRenderer implements LyricsTarget {
 
   /**
    * 译文垂直补偿：返回某行相对当前行的额外偏移。
-   * 一行带译文时，其译文会向下占据与下一行的间距，因此"它到下一行"要多留 TRANS_EXTRA。
+   * 一行带译文时，其译文会向下占据与下一行的间距，因此"它到下一行"要多留 transExtra。
    * 等价地，位于当前行之下的行按其间译文数量向下平移，之上的行向上平移。
    */
   private transShift(index: number, cur: number): number {
@@ -193,7 +214,25 @@ export class LyricsRenderer implements LyricsTarget {
     for (let k = lo; k < hi; k++) {
       if (this.lines[k]?.translated) count++;
     }
-    return (index > cur ? 1 : -1) * count * TRANS_EXTRA;
+    return (index > cur ? 1 : -1) * count * this.transExtra();
+  }
+
+  /** 各层级的实际字号（tier 0 = 当前行，最大） */
+  private fontSizeFor(tier: number): number {
+    return Math.round(this.fontSize * FONT_RATIOS[tier]);
+  }
+
+  /** 译文额外占用的垂直空间，随当前字号缩放 */
+  private transExtra(): number {
+    return transExtraFor(this.fontSize);
+  }
+
+  /** 同步 fallback 占位文字的字号（随字号缩放） */
+  private updateFallbackSize(): void {
+    const el = this.fallbackEl;
+    if (!el || el.hidden) return;
+    const big = (el.textContent ?? "").length > 0;
+    el.style.fontSize = `${Math.round(((big ? 40 : 34) / DEFAULT_FONT_SIZE) * this.fontSize)}px`;
   }
 
   private showFallback(text: string): void {
@@ -208,6 +247,7 @@ export class LyricsRenderer implements LyricsTarget {
       this.fallbackEl.textContent = text;
       this.fallbackEl.hidden = false;
       this.fallbackEl.classList.toggle("with-text", text.length > 0);
+      this.updateFallbackSize();
     }
   }
 

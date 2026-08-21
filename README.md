@@ -37,7 +37,7 @@ src/
 - 渲染：rAF 驱动 `SyncClock.now()`，本地单调时钟平滑推进
 - 暂停 → 时钟停住；恢复 → 继续；拖进度条大跳变 → 直接跳转
 
-**渲染器**：固定 7 行 DOM 池，每个元素绑定一个绝对歌词行索引；当前行索引变化时整组平移一格（CSS transition 平滑滚动），滑出窗口的行回收后从另一侧滑入。当前行 `font-size: 72px` 居中，上下行逐级缩小（52/38/30px）并降低透明度、加模糊，行距 130px。
+**渲染器**：固定 7 行 DOM 池，每个元素绑定一个绝对歌词行索引；当前行索引变化时整组平移一格（CSS transition 平滑滚动），滑出窗口的行回收后从另一侧滑入。当前行字号最大居中，上下行逐级缩小并降低透明度、加模糊。默认当前行 72px（上下行 52/38/30px）、行距 130px，均可在壁纸属性面板调节。
 
 ## 构建与使用
 
@@ -50,6 +50,20 @@ npm run build      # 产出 dist/
 **导入 Wallpaper Engine**：将 `dist/` 文件夹（含 `index.html`、`assets/`、`project.json`）拖入 Wallpaper Engine 编辑器的 Create Wallpaper，或复制到 `wallpaper_engine\projects\myprojects\`。资源全部本地打包，`base: "./"` 保证 `file://` 加载。
 
 **使用前提**：本机运行 Now Playing Service（端口 9863），并播放网易云音乐。
+
+### 可调参数（属性面板）
+
+导入后，在 Wallpaper Engine 里右键该壁纸 → **自定义**，或在编辑器右侧属性面板，可见以下调节项：
+
+| 参数 | 默认 | 范围/选项 | 说明 |
+|---|---|---|---|
+| **歌词字号** | 72 | 40–240 | 当前行（最大）字号，其余行按比例缩放 |
+| **行距** | 130 | 70–360 | 相邻两行的间距（px） |
+| **垂直位置** | 0 | -400–+400 | 歌词块整体上下移动（px，正值下移、负值上移） |
+| **亮度** | 100 | 30–200 | 歌词文字亮度（百分比，100 = 原始） |
+| **字体** | 默认 | 微软雅黑 / 黑体 / 宋体 / 楷体 | 歌词字体 |
+
+4K 屏幕（2 倍像素密度）上 72px 看起来偏小，把字号调到 140 左右、行距按需同步放大即可。调节即时生效（带平滑过渡），无需重载壁纸。
 
 ### 安装到 Wallpaper Engine（另一台机器）
 
@@ -92,6 +106,6 @@ CORS 全开放（含 `Origin: null`），Wallpaper Engine 可直接 fetch。
 
 ## 下一步
 
-- [ ] `wallpaperPropertyListener` 用户属性：歌词字号 / 位置 / 亮度（在 `wallpaper.ts` + `project.json` 的 `general.properties` 扩展）
-- [ ] 16:9 / 21:9 / 4K 分辨率适配验证
+- [x] `wallpaperPropertyListener` 用户属性：歌词字号 / 行距 / 垂直位置 / 亮度 / 字体
+- [ ] 16:9 / 21:9 / 4K 分辨率适配验证（4K 可先靠字号滑块放大）
 - [ ] 多显示器 / Wallpaper Engine FPS 限制适配（`applyGeneralProperties`）

@@ -2,7 +2,57 @@
   "description": "动态歌词壁纸：读取本机 Now Playing Service 的播放进度与同步歌词，当前句居中滚动显示",
   "file": "index.html",
   "general": {
-    "properties": {},
+    "properties": {
+      "fontsize": {
+        "order": 1,
+        "text": "歌词字号",
+        "type": "slider",
+        "value": 72,
+        "min": 40,
+        "max": 240,
+        "step": 1
+      },
+      "linegap": {
+        "order": 2,
+        "text": "行距",
+        "type": "slider",
+        "value": 130,
+        "min": 70,
+        "max": 360,
+        "step": 1
+      },
+      "offsety": {
+        "order": 3,
+        "text": "垂直位置",
+        "type": "slider",
+        "value": 0,
+        "min": -400,
+        "max": 400,
+        "step": 1
+      },
+      "brightness": {
+        "order": 4,
+        "text": "亮度",
+        "type": "slider",
+        "value": 100,
+        "min": 30,
+        "max": 200,
+        "step": 1
+      },
+      "font": {
+        "order": 5,
+        "text": "字体",
+        "type": "combo",
+        "value": "default",
+        "options": [
+          { "label": "默认（微软雅黑）", "value": "default" },
+          { "label": "微软雅黑", "value": "yahei" },
+          { "label": "黑体", "value": "simhei" },
+          { "label": "宋体", "value": "simsun" },
+          { "label": "楷体", "value": "kaiti" }
+        ]
+      }
+    },
     "supportsaudioprocessing": false
   },
   "title": "Music Lyrics Wallpaper",
