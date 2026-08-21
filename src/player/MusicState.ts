@@ -112,9 +112,21 @@ export class MusicState {
  * 前置一行"歌曲名 - 歌手"作为前奏占位。
  * time 设为 -1，永远先于任何歌词行，因此前奏（时间早于第一句歌词）时它就是当前行，
  * 居中大字显示；第一句歌词开始后随滚动自然上移、淡出窗口。
+ * 若歌词首行已自带歌名/歌手信息，则不再重复添加。
  */
 function withHeader(lines: LyricLine[], title: string, author?: string): LyricLine[] {
-  const label = [title, author].filter((s) => s && s.trim()).join(" - ");
-  if (!label) return lines;
-  return [{ time: -1, text: label }, ...lines];
+  const t = title?.trim() ?? "";
+  const a = author?.trim() ?? "";
+  if (!t && !a) return lines;
+  if (firstLineCarriesSongInfo(lines, t, a)) return lines;
+  return [{ time: -1, text: [t, a].filter(Boolean).join(" - ") }, ...lines];
+}
+
+/** 首行是否已自带歌名/歌手信息：完全等于歌名或歌手，或同时包含两者 */
+function firstLineCarriesSongInfo(lines: LyricLine[], title: string, author: string): boolean {
+  const first = (lines[0]?.text ?? "").trim();
+  if (!first) return false;
+  if (title && first === title) return true;
+  if (author && first === author) return true;
+  return !!(title && author && first.includes(title) && first.includes(author));
 }
