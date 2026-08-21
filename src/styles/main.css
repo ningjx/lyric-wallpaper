@@ -5,7 +5,7 @@
 
 :root {
   /* 与 renderer.ts 中 GAP 保持一致的基线行距（px） */
-  --gap: 84px;
+  --gap: 92px;
 }
 
 * {

@@ -21,10 +21,11 @@ export class SyncClock {
     if (this.playing === playing && this.syncAt > 0) {
       const localNow = this.now();
       if (Math.abs(localNow - position) < SyncClock.SMOOTH_THRESHOLD) {
-        // 轻微漂移：调整锚点使本地时钟在 position 处连续，不回跳
+        // 轻微漂移：调整锚点使校准后 now() 仍在 localNow 处连续（不回跳），
+        // 同时以 position 为基线缓慢收敛到服务端位置
         const t0 = performance.now();
         this.serverPos = position;
-        this.syncAt = t0 - (position - localNow) * 1000;
+        this.syncAt = t0 - (localNow - position) * 1000;
         return;
       }
     }

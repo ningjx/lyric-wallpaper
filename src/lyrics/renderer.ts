@@ -7,9 +7,9 @@ const HALF = 3;
 /** 窗口行数 */
 const WINDOW = HALF * 2 + 1;
 /** 行间距（px），由 CSS 变量 --gap 同步 */
-const GAP = 84;
+const GAP = 92;
 /** 各层级字号（tier 0 = 当前行，最大） */
-const FONT_SIZE = [46, 33, 26, 22];
+const FONT_SIZE = [56, 40, 31, 26];
 /** 各层级透明度 */
 const OPACITY = [1, 0.5, 0.26, 0.13];
 /** 各层级模糊 */
