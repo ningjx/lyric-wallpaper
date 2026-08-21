@@ -8,6 +8,12 @@ const HALF = 3;
 const WINDOW = HALF * 2 + 1;
 /** 行间距（px），由 CSS 变量 --gap 同步 */
 const GAP = 130;
+/**
+ * 译文占用的额外垂直空间（px）。当某行带译文时，其译文会向下挤压下一行，
+ * 因此把"该行到下一行"的间距多留出 TRANS_EXTRA，间距从译文底部算起。
+ * 数值取当前行（最大字号 72px）译文的实际高度：0.42em*72*1.3 + 4px margin ≈ 43px。
+ */
+const TRANS_EXTRA = 42;
 /** 各层级字号（tier 0 = 当前行，最大） */
 const FONT_SIZE = [72, 52, 38, 30];
 /** 各层级透明度 */
@@ -153,7 +159,10 @@ export class LyricsRenderer implements LyricsTarget {
     const { el } = it;
     if (instant) el.style.transition = "none";
     el.classList.toggle("current", offset === 0);
-    el.style.transform = `translate(-50%, ${offset * GAP}px)`;
+    // 译文补偿：该行与当前行之间有多少带译文的行，就向下（上）平移多少，
+    // 使译文不挤压下一行，间距从译文底部算起。
+    const shift = this.transShift(it.index, this.cur);
+    el.style.transform = `translate(-50%, ${offset * GAP + shift}px)`;
     el.style.fontSize = `${FONT_SIZE[tier]}px`;
     el.style.opacity = `${OPACITY[tier]}`;
     el.style.filter = tier === 0 ? "none" : `blur(${BLUR[tier]}px)`;
@@ -169,6 +178,22 @@ export class LyricsRenderer implements LyricsTarget {
     it.textEl.textContent = line ? line.text : "";
     it.transEl.textContent = line?.translated ? line.translated : "";
     it.transEl.style.display = line?.translated ? "" : "none";
+  }
+
+  /**
+   * 译文垂直补偿：返回某行相对当前行的额外偏移。
+   * 一行带译文时，其译文会向下占据与下一行的间距，因此"它到下一行"要多留 TRANS_EXTRA。
+   * 等价地，位于当前行之下的行按其间译文数量向下平移，之上的行向上平移。
+   */
+  private transShift(index: number, cur: number): number {
+    if (index === cur) return 0;
+    const lo = Math.min(index, cur);
+    const hi = Math.max(index, cur);
+    let count = 0;
+    for (let k = lo; k < hi; k++) {
+      if (this.lines[k]?.translated) count++;
+    }
+    return (index > cur ? 1 : -1) * count * TRANS_EXTRA;
   }
 
   private showFallback(text: string): void {

@@ -61,7 +61,9 @@ body {
   transform: translate(-50%, -50%);
   /* 宽度自适应：常规屏按视口比例，超宽屏（21:9）放宽到上限 */
   width: min(90vw, 2200px);
-  height: calc(var(--gap) * 7);
+  /* 7 行 + 译文补偿的额外高度（renderer.ts 的 TRANS_EXTRA 最多上下各 3 行带译文），
+     避免带译文的上下行被 overflow 提前裁剪 */
+  height: calc(var(--gap) * 7 + 300px);
   overflow: hidden;
 }
 

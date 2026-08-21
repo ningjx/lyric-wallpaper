@@ -69,14 +69,14 @@ export class MusicState {
     if (key !== this.songKey) {
       this.songKey = key;
       // 歌词加载完成后才淡入场景层，避免"背景已显示、歌词还空白"的闪烁
-      await this.loadLyrics(track.title);
+      await this.loadLyrics(track.title, track.author);
     } else {
       // 歌词已就绪：保持显示（含暂停状态，暂停时保留歌词停在当前句）
       this.scene.show();
     }
   }
 
-  private async loadLyrics(title: string): Promise<void> {
+  private async loadLyrics(title: string, author?: string): Promise<void> {
     try {
       const ly = await this.api.fetchLyrics();
       // 拉取期间可能已切歌/停播
@@ -85,12 +85,12 @@ export class MusicState {
         this.target.setLines([], title);
       } else {
         const original = parseLrc(ly.lrc);
-        if (ly.hasTranslatedLyric && ly.translatedLyric) {
-          const translated = parseLrc(ly.translatedLyric);
-          this.target.setLines(mergeTranslation(original, translated));
-        } else {
-          this.target.setLines(original);
-        }
+        const lines =
+          ly.hasTranslatedLyric && ly.translatedLyric
+            ? mergeTranslation(original, parseLrc(ly.translatedLyric))
+            : original;
+        // 前奏期间还没有歌词行，前置一行"歌曲名 - 歌手"占位作为前奏的当前行
+        this.target.setLines(withHeader(lines, title, author));
       }
     } catch {
       // 歌词拉取失败：显示歌曲信息兜底，不白屏
@@ -106,4 +106,15 @@ export class MusicState {
     const el = document.getElementById("offline");
     if (el) el.hidden = v;
   }
+}
+
+/**
+ * 前置一行"歌曲名 - 歌手"作为前奏占位。
+ * time 设为 -1，永远先于任何歌词行，因此前奏（时间早于第一句歌词）时它就是当前行，
+ * 居中大字显示；第一句歌词开始后随滚动自然上移、淡出窗口。
+ */
+function withHeader(lines: LyricLine[], title: string, author?: string): LyricLine[] {
+  const label = [title, author].filter((s) => s && s.trim()).join(" - ");
+  if (!label) return lines;
+  return [{ time: -1, text: label }, ...lines];
 }
