@@ -1,0 +1,14 @@
+http://localhost:9863/api/lyric
+
+{
+  "source": "netease",
+  "title": "Everlasting Love",
+  "author": "Sam Smith",
+  "duration": 222,
+  "hasLyric": true,
+  "hasTranslatedLyric": true,
+  "hasKaraokeLyric": false,
+  "lrc": "{\"t\":0,\"c\":[{\"tx\":\"作词: \"},{\"tx\":\"Sam Smith\",\"li\":\"http://p1.music.126.net/FnZlchV-gzZdePmO3jR2yw==/109951172686858615.jpg\",\"or\":\"orpheus://nm/artist/home?id=740216&type=artist\"},{\"tx\":\"/\"},{\"tx\":\"Simon Aldred\"}]}\n{\"t\":1000,\"c\":[{\"tx\":\"作曲: \"},{\"tx\":\"Sam Smith\",\"li\":\"http://p1.music.126.net/FnZlchV-gzZdePmO3jR2yw==/109951172686858615.jpg\",\"or\":\"orpheus://nm/artist/home?id=740216&type=artist\"},{\"tx\":\"/\"},{\"tx\":\"Simon Aldred\"}]}\n[00:06.670]Sad night walker, what you waiting for?\n[00:16.171]Sad night walker, what you waiting for?\n[00:28.217]You can't live inside your busy mind forever\n[00:31.187]Hoping love will find you\n[00:37.207]\n[00:38.209]So dance with me, move with me\n[00:49.751]I wanna see all of you so don't turn off the light\n[00:54.294]Will you play the part for just one night\n[00:59.328]And be my everlasting love?\n[01:00.315]\n[01:12.006]I'll lay with you\n[01:16.338]I'll be an echo in your heart\n[01:18.873]Carry me into the darkest nights\n[01:21.900]And I will be your spark\n[01:24.926]\n[01:26.432]So dance with me, move with me\n[01:38.452]I wanna see all of you so don't turn off the light\n[01:43.470]Will you play the part for just one night\n[01:47.979]And be my everlasting love?\n[02:06.537]\n[02:31.337]When morning breaks\n[02:36.357]My heart awakes\n[02:42.401]Something in your hazel eyes\n[02:45.905]Makes me feel alive\n[02:49.417]Will you play the part for all my life\n[02:54.937]And be my everlasting love?\n[02:57.962]\n[03:19.029]Sweet love, love, love\n[03:29.044]Love, love, love, love\n",
+  "translatedLyric": "[by:波罗猫与海鸥心]\n[00:06.670]悲伤的夜行者 你还在等候什么\n[00:16.171]悲伤的夜行者 你还在等候什么\n[00:28.217]你无法永远困在纷乱的思绪之中\n[00:31.187]期盼着爱会主动向你奔赴\n[00:37.207]\n[00:38.209]那就与我共舞 随我摇曳\n[00:49.751]我想看清完整的你 别将灯火熄灭\n[00:54.294]可否就扮演这角色 仅此一晚\n[00:59.328]做我永恒不灭的爱恋\n[01:00.315]\n[01:12.006]我会与你相拥而眠\n[01:16.338]化作回荡在你心底的回响\n[01:18.873]携我坠入沉沉黑夜\n[01:21.900]我便成为你的点点星火\n[01:24.926]\n[01:26.432]那就与我共舞 随我摇曳\n[01:38.452]我想看清完整的你 别将灯火熄灭\n[01:43.470]可否就扮演这角色 仅此一晚\n[01:47.979]做我永恒不灭的爱恋\n[02:06.537]\n[02:31.337]当破晓来临\n[02:36.357]我的心缓缓苏醒\n[02:42.401]你那双淡褐眼眸里的万般情愫\n[02:45.905]予我鲜活的生命体感\n[02:49.417]可否穷尽余生都扮演这个角色\n[02:54.937]做我永恒不灭的爱恋\n[02:57.962]\n[03:19.029]甜蜜的爱 爱 爱\n[03:29.044]爱 爱 爱 爱\n",
+  "karaokeLyric": ""
+}

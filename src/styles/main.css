@@ -1,0 +1,165 @@
+/* ============================================================
+ * Music Lyrics Wallpaper · 全局样式
+ * 只保留歌词渲染 + 离线提示，无其他装饰性功能
+ * ============================================================ */
+
+:root {
+  /* 与 renderer.ts 中 GAP 保持一致的基线行距（px） */
+  --gap: 84px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* 纯黑：场景层淡出后露出底层（Wallpaper Engine 中为原壁纸/桌面） */
+  background: #000;
+  font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  color: #fff;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ============ 场景层：播放时淡入，不播放时淡出 ============ */
+#scene {
+  position: fixed;
+  inset: 0;
+  opacity: 0;
+  /* 淡出（停止播放）更慢，符合"慢慢消失" */
+  transition: opacity 0.9s ease;
+  will-change: opacity;
+}
+
+#scene.active {
+  opacity: 1;
+  /* 淡入（开始播放）稍快 */
+  transition: opacity 0.55s ease;
+}
+
+/* 背景：深色渐变衬托歌词 */
+#bg {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(110% 100% at 50% 42%, #101018 0%, #050508 78%);
+}
+
+/* ============ 歌词容器：屏幕正中央 ============ */
+.lyrics {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(86vw, 1400px);
+  height: calc(var(--gap) * 7);
+  overflow: hidden;
+}
+
+/* ============ 歌词行 ============ */
+.line {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 100%;
+  text-align: center;
+  line-height: 1.3;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  will-change: transform, opacity, filter;
+  /* JS 每行设置 transform/font-size/opacity/filter，这里负责过渡动画 */
+  transition:
+    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    font-size 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.55s ease,
+    filter 0.55s ease,
+    text-shadow 0.55s ease;
+  pointer-events: none;
+}
+
+.line .text {
+  display: block;
+}
+
+.line .trans {
+  display: block;
+  font-size: 0.42em;
+  font-weight: 300;
+  opacity: 0.82;
+  margin-top: 4px;
+  letter-spacing: 0.03em;
+}
+
+/* ============ 无歌词占位（显示歌名） ============ */
+.fallback {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  text-align: center;
+  font-size: 34px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  text-shadow: 0 0 40px rgba(255, 255, 255, 0.35);
+}
+
+.fallback:not([hidden]) {
+  opacity: 1;
+}
+
+.fallback.with-text {
+  font-size: 40px;
+}
+
+/* ============ 离线遮罩：API 不可用时提示，避免白屏 ============ */
+.offline {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 5, 10, 0.86);
+  backdrop-filter: blur(10px);
+  transition: opacity 0.6s ease;
+}
+
+.offline[hidden] {
+  display: none;
+}
+
+.offline-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.offline-spinner {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.14);
+  border-top-color: #7aa0ff;
+  animation: spin 1s linear infinite;
+}
+
+.offline-text {
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "description": "动态歌词壁纸：读取本机 Now Playing Service 的播放进度与同步歌词，当前句居中滚动显示",
+  "file": "index.html",
+  "general": {
+    "properties": {},
+    "supportsaudioprocessing": false
+  },
+  "title": "Music Lyrics Wallpaper",
+  "type": "web",
+  "visibility": "public"
+}
