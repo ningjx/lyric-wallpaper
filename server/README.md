@@ -1,6 +1,6 @@
 # wyyyy lyric server — 网易云音乐 Now Playing 服务
 
-为同仓库的壁纸前端（`src/`，Wallpaper Engine 歌词壁纸）提供网易云音乐播放状态与歌词的本地服务，替代 [Widdit/now-playing-service](https://github.com/Widdit/now-playing-service)。
+为同仓库的壁纸前端（`wallpaper/src/`，Wallpaper Engine 歌词壁纸）提供网易云音乐播放状态与歌词的本地服务，替代 [Widdit/now-playing-service](https://github.com/Widdit/now-playing-service)。
 
 **核心价值**：原 now-playing-service 通过 UI Automation 读取播放进度，最小化/桌面歌词模式下经常读不到。本项目改用**进程内存读取**，精度毫秒级、任何窗口状态都可用。
 
@@ -138,7 +138,7 @@ url = f"https://music.163.com/api/song/lyric?id={song_id}&lv=-1&kv=-1&tv=-1"
 }
 ```
 
-前端逻辑（`src/player/MusicState.ts` 等）：
+前端逻辑（`wallpaper/src/player/MusicState.ts` 等）：
 - 每 200ms 轮询 `/query`，用 `seekbarCurrentPosition` 校准本地 SyncClock
 - `track.id:track.title` 组合键判断切歌 → 切歌时请求 `/api/lyric`
 - `player.hasSong == false` → 清空歌词隐藏场景

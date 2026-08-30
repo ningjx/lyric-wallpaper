@@ -7,7 +7,10 @@ export default defineConfig({
   build: {
     // Wallpaper Engine 内置 CEF 版本较旧，降低 target 保证兼容
     target: "chrome90",
-    outDir: "dist",
+    // 产物输出到仓库根 dist/（vite 根在 wallpaper/，故用 ../dist；
+    // 输出目录在根之外，需显式 emptyOutDir 才能清空旧产物）
+    outDir: "../dist",
+    emptyOutDir: true,
     assetsInlineLimit: 0,
     minify: "esbuild",
     sourcemap: false,

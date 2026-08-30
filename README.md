@@ -7,9 +7,10 @@
 | 目录 | 类型 | 作用 |
 |------|------|------|
 | `server/` | 本地服务端 (Python) | 读取网易云播放状态与歌词，提供 Now Playing API |
-| `src/`（仓库根） | 壁纸前端 (Vite + TypeScript) | Wallpaper Engine 网页壁纸，订阅服务端 API 显示同步歌词 |
+| `wallpaper/` | 壁纸前端源码 (Vite + TypeScript) | Wallpaper Engine 网页壁纸，订阅服务端 API 显示同步歌词 |
+| `dist/` | 前端构建产物 | 由 `wallpaper/` 构建生成，可直接导入 Wallpaper Engine |
 
-> `dist/` 是前端构建产物，也是 Wallpaper Engine 直接导入的内容。
+> 一眼看懂：`wallpaper/` 是壁纸源码，`server/` 是服务端，`dist/` 是产物，`docs/` 是文档。
 
 ## 架构
 
@@ -54,8 +55,9 @@ python nowplaying_server.py
 - **自行构建**（需 Node.js）：
 
   ```bash
+  cd wallpaper
   npm install
-  npm run build      # 产出 dist/
+  npm run build      # 产出 ../dist/
   ```
 
 导入后播放任意歌曲即可看到同步歌词。
@@ -81,6 +83,22 @@ python nowplaying_server.py
 ```text
 lyric-wallpaper/
 ├── README.md            本文件
+├── .gitignore
+├── wallpaper/           壁纸前端源码（Vite + TypeScript）
+│   ├── index.html           Vite 入口
+│   ├── package.json         依赖与构建脚本
+│   ├── vite.config.ts       构建配置（产物输出到 ../dist/）
+│   ├── tsconfig.json        TypeScript 配置
+│   ├── public/project.json  Wallpaper Engine 壁纸配置（属性面板定义）
+│   └── src/                 前端源码
+│       ├── main.ts          入口：组装模块、双循环
+│       ├── wallpaper.ts     Wallpaper Engine 属性面板适配
+│       ├── scene.ts         场景层淡入淡出
+│       ├── api/             Now Playing API 适配（端点/类型/HTTP）
+│       ├── player/          状态机 + 本地时钟
+│       ├── lyrics/          LRC 解析 + 时间轴 + 渲染器
+│       └── styles/          布局与动画
+├── dist/                构建产物（可直接导入 Wallpaper Engine）
 ├── server/              服务端（Python）
 │   ├── README.md
 │   ├── nowplaying_server.py    Now Playing API 服务（端口 9863）
@@ -88,17 +106,6 @@ lyric-wallpaper/
 │   ├── netease_nowplaying.py   命令行读取当前歌曲
 │   ├── requirements.txt
 │   └── tools/                  21 个开发/验证脚本（研究记录，非运行必需）
-├── src/                 前端源码（Vite + TypeScript）
-│   ├── main.ts          入口：组装模块、双循环
-│   ├── wallpaper.ts     Wallpaper Engine 属性面板适配
-│   ├── scene.ts         场景层淡入淡出
-│   ├── api/             Now Playing API 适配（端点/类型/HTTP）
-│   ├── player/          状态机 + 本地时钟
-│   ├── lyrics/          LRC 解析 + 时间轴 + 渲染器
-│   └── styles/          布局与动画
-├── public/project.json  Wallpaper Engine 壁纸配置（属性面板定义）
-├── index.html           Vite 入口
-├── dist/                构建产物（可直接导入 Wallpaper Engine）
 └── docs/                方案文档 + API 示例
     ├── wallpaper_engine_now_playing_歌词动态壁纸方案.md
     └── 获取歌词示例.txt
@@ -119,4 +126,4 @@ lyric-wallpaper/
 - 首次在新版本网易云上运行时，需**正在播放一首歌**才能自动定位偏移
 - VIP 加密歌曲、本地歌曲的歌词可能为空（属网易云服务端限制）
 - 多开网易云时服务端只读取第一个进程
-- 壁纸请求 `http://127.0.0.1:9863`，若服务端改了端口需同步修改 `src/api/config.ts`
+- 壁纸请求 `http://127.0.0.1:9863`，若服务端改了端口需同步修改 `wallpaper/src/api/config.ts`
