@@ -30,6 +30,7 @@ from threading import Lock
 import pymem
 
 from offset_probe import OffsetResolver
+from console import console
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -38,9 +39,6 @@ PROCESS_NAME = "cloudmusic.exe"
 MODULE_NAME = "cloudmusic.dll"
 
 # 播放状态偏移由 offset_probe.OffsetResolver 自动定位（偏移随版本变化，运行时探测）
-
-# 正常运行提示：周期性心跳间隔（秒）。服务端在每次 /query 轮询中检测，命中即打印一行当前状态
-HEARTBEAT_INTERVAL = 20.0
 
 API_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -100,8 +98,9 @@ class NeteaseMonitor:
         self.resolver = OffsetResolver()
         self._resolver_started = False
         self._ready_logged = False
-        self._last_heartbeat = 0.0   # 上次心跳打印时间戳
         self._last_song_key = None   # 上次歌曲标识 (song|author)，用于切歌检测
+        self._last_progress = None   # 上次读取的进度（秒），用于播放/暂停判定
+        self._last_progress_at = 0.0  # 上次读取进度的墙钟时间（秒）
 
     def start(self):
         """启动后台偏移解析线程（幂等，可在 main 中提前调用）"""
@@ -164,18 +163,32 @@ class NeteaseMonitor:
         if offsets is None:
             return None  # 偏移尚未解析（正在探测/未运行）
         if not self.attach():
+            console.set_status("未检测到网易云音乐")
             return None
         try:
             progress = self.read_float(offsets["progress"])
             duration = self.read_float(offsets["duration"])
-            rate = self.read_float(offsets["rate"])
             title = self.get_window_title()
             song = author = ""
             if " - " in title:
                 # 网易云窗口标题格式: '歌名 - 歌手'
                 song, author = title.split(" - ", 1)
 
-            playing = abs(rate) > 0.5
+            # 播放/暂停判定：以「进度是否随墙钟时间推进」为准。
+            # 原来的 rate（progress+0x8 的 float64）实为播放速度（1.0x），
+            # 暂停时仍保持 1.0，导致暂停漏判（日志一直显示「播放中」）。
+            now = time.time()
+            if self._last_progress is None:
+                playing = True                  # 首次采样默认播放，下一轮即校正
+            else:
+                elapsed = max(now - self._last_progress_at, 1e-6)
+                moved = progress - self._last_progress
+                # 播放中进度约以 1x 速度推进（moved≈elapsed）；暂停/切歌时进度冻结（moved≈0）。
+                # 阈值取 elapsed 一半，兼容 0.5x 以上倍速，也容忍进度条小幅抖动。
+                playing = moved > elapsed * 0.5
+            self._last_progress = progress
+            self._last_progress_at = now
+
             status = {
                 "progress": progress,
                 "duration": duration,
@@ -186,42 +199,42 @@ class NeteaseMonitor:
             }
             if status["has_song"]:
                 self._note_playing(status)
+                self._update_status(status)
+            else:
+                console.set_status("等待播放...")
             return status
         except Exception:
             return None
 
     def _note_playing(self, status):
-        """正常运行提示：首次就绪 / 切歌 / 周期性心跳"""
+        """一次性事件日志：首次就绪 / 切歌（实时播放状态由底部状态行持续刷新）"""
         key = f"{status['song']}|{status['author']}"
-        now = time.time()
 
         # 1) 首次就绪
         if not self._ready_logged:
             self._ready_logged = True
             self._last_song_key = key
-            self._last_heartbeat = now
             m, s = divmod(int(status["duration"]), 60)
-            print(f"✓ 服务就绪：正在播放「{status['song']} - {status['author']}」"
-                  f" ({m:02d}:{s:02d})", flush=True)
+            console.log(f"✓ 服务就绪：正在播放「{status['song']} - {status['author']}」"
+                        f" ({m:02d}:{s:02d})")
+            console.log("按 Ctrl+C 停止")
             return
 
         # 2) 切歌
         if key != self._last_song_key:
             self._last_song_key = key
-            self._last_heartbeat = now
             m, s = divmod(int(status["duration"]), 60)
-            print(f"▶ 切歌：正在播放「{status['song']} - {status['author']}」"
-                  f" ({m:02d}:{s:02d})", flush=True)
-            return
+            console.log(f"▶ 切歌：正在播放「{status['song']} - {status['author']}」"
+                        f" ({m:02d}:{s:02d})")
 
-        # 3) 周期性心跳
-        if now - self._last_heartbeat >= HEARTBEAT_INTERVAL:
-            self._last_heartbeat = now
-            pm, ps = divmod(int(status["progress"]), 60)
-            dm, ds = divmod(int(status["duration"]), 60)
-            state = "播放中" if status["playing"] else "已暂停"
-            print(f"[nowplaying] {state}  {status['song']} - {status['author']}  "
-                  f"{pm:02d}:{ps:02d}/{dm:02d}:{ds:02d}", flush=True)
+    def _update_status(self, status):
+        """刷新底部实时状态行：旋转动画 + 播放状态 + 进度"""
+        state = "播放中" if status["playing"] else "已暂停"
+        pm, ps = divmod(int(status["progress"]), 60)
+        dm, ds = divmod(int(status["duration"]), 60)
+        console.set_status(
+            f"{state}  {status['song']} - {status['author']}  "
+            f"{pm:02d}:{ps:02d}/{dm:02d}:{ds:02d}")
 
 
 # ============ 网易云 API ============
@@ -453,15 +466,14 @@ def main():
     args = parser.parse_args()
 
     server = HTTPServer(("127.0.0.1", args.port), NowPlayingHandler)
-    NowPlayingHandler.monitor.start()  # 提前启动偏移探测（后台线程）
-    print(f"Now Playing API 替代服务已启动: http://127.0.0.1:{args.port}")
-    print(f"  端点: /query (状态)  /api/lyric (歌词)")
-    print(f"  数据源: 内存读取 (进度/状态) + 网易云 API (歌词)")
-    print("按 Ctrl+C 停止")
+    console.log(f"Now Playing API 替代服务已启动: http://127.0.0.1:{args.port}")
+    console.log("  端点: /query (状态)  /api/lyric (歌词)")
+    console.log("  数据源: 内存读取 (进度/状态) + 网易云 API (歌词)")
+    NowPlayingHandler.monitor.start()  # 横幅之后启动后台探测，保证日志顺序
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n已停止。")
+        console.stop("已停止。")
 
 
 if __name__ == "__main__":

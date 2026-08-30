@@ -115,7 +115,7 @@ lyric-wallpaper/
 
 见 [`server/README.md`](server/README.md)。要点：
 
-- **播放状态**：读取 `cloudmusic.dll` 内存中的三个 float64 全局变量（进度 / 时长 / 速率）
+- **播放状态**：读取 `cloudmusic.dll` 内存中的进度 / 时长两个 float64 全局变量，播放/暂停由「进度是否随墙钟时间推进」判断（暂停时进度冻结）
 - **歌名歌手**：枚举网易云窗口标题 `歌名 - 歌手`（含最小化到托盘的隐藏窗口）
 - **歌词**：网易云官方 API（`music.163.com/api/song/lyric`）
 - **偏移自动探测**：三个字段的地址随版本变化，`offset_probe.py` 用「3 秒内进度 +3 秒」的启发式自动定位，并按版本号（exe 文件版本）缓存到 `offsets_config.json`

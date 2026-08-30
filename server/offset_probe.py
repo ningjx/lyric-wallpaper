@@ -55,11 +55,12 @@ CONFIG_NAME = "offsets_config.json"
 
 
 def log(msg: str):
-    """后台线程内安全打印（立即 flush）"""
+    """后台线程内安全打印（经共享控制台，避免打断底部状态行）"""
     try:
-        print(f"[offset-probe] {msg}", flush=True)
+        from console import console
+        console.log(f"[offset-probe] {msg}")
     except Exception:
-        pass
+        print(f"[offset-probe] {msg}", flush=True)
 
 
 def find_module(pm):
