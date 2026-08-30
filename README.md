@@ -8,9 +8,8 @@
 |------|------|------|
 | `server/` | 本地服务端 (Python) | 读取网易云播放状态与歌词，提供 Now Playing API |
 | `wallpaper/` | 壁纸前端源码 (Vite + TypeScript) | Wallpaper Engine 网页壁纸，订阅服务端 API 显示同步歌词 |
-| `dist/` | 前端构建产物 | 由 `wallpaper/` 构建生成，可直接导入 Wallpaper Engine |
 
-> 一眼看懂：`wallpaper/` 是壁纸源码，`server/` 是服务端，`dist/` 是产物，`docs/` 是文档。
+> 一眼看懂：`wallpaper/` 是壁纸源码，`server/` 是服务端，`docs/` 是文档。壁纸构建产物**不入库**，由 GitHub Actions 打 tag 时自动构建发布（见 [Releases](https://github.com/ningjx/lyric-wallpaper/releases)）。
 
 ## 架构
 
@@ -51,13 +50,15 @@ python nowplaying_server.py
 
 ### 2. 导入壁纸
 
-- **无需构建**：把仓库里的 `dist/` 文件夹拖入 Wallpaper Engine 的「创建壁纸」窗口，或复制到 `wallpaper_engine/projects/myprojects/`。
+壁纸构建产物**不提交到仓库**，有两种获取方式：
+
+- **下载已发布版本**：到 [Releases](https://github.com/ningjx/lyric-wallpaper/releases) 下载 `wallpaper-vX.Y.Z.zip`，解压后把文件夹拖入 Wallpaper Engine 的「创建壁纸」窗口，或复制到 `wallpaper_engine/projects/myprojects/`。
 - **自行构建**（需 Node.js）：
 
   ```bash
   cd wallpaper
   npm install
-  npm run build      # 产出 ../dist/
+  npm run build      # 产出 ../dist/，把 dist/ 拖入 Wallpaper Engine
   ```
 
 导入后播放任意歌曲即可看到同步歌词。
@@ -98,7 +99,6 @@ lyric-wallpaper/
 │       ├── player/          状态机 + 本地时钟
 │       ├── lyrics/          LRC 解析 + 时间轴 + 渲染器
 │       └── styles/          布局与动画
-├── dist/                构建产物（可直接导入 Wallpaper Engine）
 ├── server/              服务端（Python）
 │   ├── README.md
 │   ├── nowplaying_server.py    Now Playing API 服务（端口 9863）
@@ -110,6 +110,24 @@ lyric-wallpaper/
     ├── wallpaper_engine_now_playing_歌词动态壁纸方案.md
     └── 获取歌词示例.txt
 ```
+
+## 发布新版本
+
+推送一个 `v` 开头的 tag 即可触发 GitHub Actions 自动构建并发布：
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+发布完成后，[Releases](https://github.com/ningjx/lyric-wallpaper/releases) 会生成两个压缩包：
+
+| 文件 | 内容 | 用途 |
+|------|------|------|
+| `wallpaper-v1.0.0.zip` | 壁纸构建产物（`index.html` / `project.json` / `assets/`） | 解压后导入 Wallpaper Engine |
+| `server-v1.0.0.zip` | 服务端（Python 源码） | 解压后 `pip install -r requirements.txt` 并运行 |
+
+工作流定义见 [`.github/workflows/release.yml`](.github/workflows/release.yml)。
 
 ## 服务端工作原理
 

@@ -1,0 +1,61 @@
+name: Build and Release
+
+# 推送 v* 标签时触发：构建壁纸产物，并打包「壁纸」与「服务端」两个压缩包发布到 Release
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # 创建 Release 并上传资产所需
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true # 快速连续打 tag 时，取消仍在进行中的旧构建
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: wallpaper/package-lock.json
+
+      - name: Install wallpaper dependencies
+        working-directory: wallpaper
+        run: npm ci
+
+      - name: Build wallpaper
+        working-directory: wallpaper
+        run: npm run build
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Package wallpaper
+        run: |
+          test -f dist/index.html || { echo "构建产物缺失 dist/index.html"; exit 1; }
+          cd dist
+          zip -r "../wallpaper-v${{ steps.version.outputs.version }}.zip" .
+
+      - name: Package server
+        run: |
+          zip -r "server-v${{ steps.version.outputs.version }}.zip" server \
+            -x "server/__pycache__/*" "server/*.pyc"
+
+      - name: Create release and upload assets
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: |
+            wallpaper-v${{ steps.version.outputs.version }}.zip
+            server-v${{ steps.version.outputs.version }}.zip
