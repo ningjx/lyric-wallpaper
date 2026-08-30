@@ -21,17 +21,35 @@
         "max": 360,
         "step": 1
       },
-      "offsety": {
+      "syncoffset": {
         "order": 3,
-        "text": "垂直位置",
+        "text": "歌词同步偏移(ms, 正=提前)",
         "type": "slider",
         "value": 0,
-        "min": -400,
-        "max": 400,
+        "min": -5000,
+        "max": 5000,
+        "step": 100
+      },
+      "offsetx": {
+        "order": 4,
+        "text": "歌词水平偏移(左右)",
+        "type": "slider",
+        "value": 0,
+        "min": -2000,
+        "max": 2000,
+        "step": 1
+      },
+      "offsety": {
+        "order": 5,
+        "text": "歌词垂直偏移(上下)",
+        "type": "slider",
+        "value": 0,
+        "min": -2000,
+        "max": 2000,
         "step": 1
       },
       "brightness": {
-        "order": 4,
+        "order": 6,
         "text": "亮度",
         "type": "slider",
         "value": 100,
@@ -40,7 +58,7 @@
         "step": 1
       },
       "font": {
-        "order": 5,
+        "order": 7,
         "text": "字体",
         "type": "combo",
         "value": "default",

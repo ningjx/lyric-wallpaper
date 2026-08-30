@@ -6,7 +6,8 @@
  *   值通过 `properties.<key>.value` 读取。
  * - applyGeneralProperties(properties)：全局属性（如 FPS 限制）。
  *
- * 本项目把"歌词字号 / 行距 / 垂直位置 / 亮度 / 字体"接到这里，回调给渲染器与 CSS 变量。
+ * 本项目把"歌词字号 / 行距 / 同步偏移 / 水平偏移 / 垂直偏移 / 亮度 / 字体"
+ * 接到这里，回调给渲染器与 CSS 变量。
  */
 
 /** 可调节的歌词布局参数 */
@@ -17,6 +18,10 @@ export interface WallpaperSettings {
   lineGap: number;
   /** 歌词块垂直偏移（px），正值下移、负值上移 */
   offsetY: number;
+  /** 歌词块水平偏移（px），正值右移、负值左移 */
+  offsetX: number;
+  /** 歌词同步偏移（毫秒），正数提前、负数延后 */
+  syncOffset: number;
   /** 亮度（百分比，100 = 原始） */
   brightness: number;
   /** 字体（CSS font-family 值） */
@@ -41,6 +46,8 @@ export const DEFAULT_SETTINGS: WallpaperSettings = {
   fontSize: 72,
   lineGap: 130,
   offsetY: 0,
+  offsetX: 0,
+  syncOffset: 0,
   brightness: 100,
   fontFamily: DEFAULT_FONT_FAMILY,
 };
@@ -61,12 +68,16 @@ export function setupWallpaperEnvironment(onChange: SettingsListener): void {
       const fontSize = readPositiveNumber(propertyValue(properties.fontsize));
       const lineGap = readPositiveNumber(propertyValue(properties.linegap));
       const offsetY = readNumber(propertyValue(properties.offsety));
+      const offsetX = readNumber(propertyValue(properties.offsetx));
+      const syncOffset = readNumber(propertyValue(properties.syncoffset));
       const brightness = readPositiveNumber(propertyValue(properties.brightness));
       const font = propertyValue(properties.font);
 
       if (fontSize !== null) current.fontSize = fontSize;
       if (lineGap !== null) current.lineGap = lineGap;
       if (offsetY !== null) current.offsetY = offsetY;
+      if (offsetX !== null) current.offsetX = offsetX;
+      if (syncOffset !== null) current.syncOffset = syncOffset;
       if (brightness !== null) current.brightness = brightness;
       if (typeof font === "string" && font in FONTS) current.fontFamily = FONTS[font];
 

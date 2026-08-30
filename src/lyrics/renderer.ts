@@ -57,6 +57,8 @@ export class LyricsRenderer implements LyricsTarget {
   private fontSize = DEFAULT_FONT_SIZE;
   /** 行距（px），由属性面板调节 */
   private gap = DEFAULT_GAP;
+  /** 歌词同步偏移（毫秒），正数提前、负数延后，由属性面板调节 */
+  private syncOffset = 0;
 
   constructor(container: HTMLElement) {
     for (let i = 0; i < WINDOW; i++) {
@@ -97,10 +99,10 @@ export class LyricsRenderer implements LyricsTarget {
     this.showFallback("");
   }
 
-  /** 每帧调用：按当前播放时间推进当前行 */
+  /** 每帧调用：按当前播放时间（含同步偏移）推进当前行 */
   update(time: number): void {
     if (this.lines.length === 0) return;
-    const next = findCurrentLine(this.lines, time);
+    const next = findCurrentLine(this.lines, time + this.syncOffset / 1000);
     if (next !== this.cur) {
       this.advance(next);
     }
@@ -116,6 +118,11 @@ export class LyricsRenderer implements LyricsTarget {
       this.applyItem(it, offset, tierOf(offset), false);
     }
     this.updateFallbackSize();
+  }
+
+  /** 设置歌词同步偏移（毫秒），正数提前、负数延后 */
+  setSyncOffset(ms: number): void {
+    this.syncOffset = ms;
   }
 
   private resetPool(): void {

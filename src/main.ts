@@ -16,15 +16,17 @@ function main(): void {
   const clock = new SyncClock();
   const renderer = new LyricsRenderer(lyricsEl);
 
-  // 属性面板调节：同步渲染器字号/行距 + CSS 变量（容器高度/译文补偿/位置/字体）
+  // 属性面板调节：同步渲染器字号/行距/同步偏移 + CSS 变量（位置/字体/亮度）
   const applySettings = (s: WallpaperSettings): void => {
     const root = document.documentElement;
     root.style.setProperty("--gap", `${s.lineGap}px`);
     root.style.setProperty("--trans-extra", `${transExtraFor(s.fontSize)}px`);
+    root.style.setProperty("--offset-x", `${s.offsetX}px`);
     root.style.setProperty("--offset-y", `${s.offsetY}px`);
     root.style.setProperty("--font-family", s.fontFamily);
     lyricsEl.style.filter = s.brightness === 100 ? "" : `brightness(${s.brightness / 100})`;
     renderer.setLayout(s.fontSize, s.lineGap);
+    renderer.setSyncOffset(s.syncOffset);
   };
 
   setupWallpaperEnvironment(applySettings);

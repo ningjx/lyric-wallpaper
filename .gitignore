@@ -3,3 +3,8 @@ node_modules/
 memory/
 *.log
 demo.html
+
+# Python（服务端）
+__pycache__/
+*.pyc
+server/offsets_config.json

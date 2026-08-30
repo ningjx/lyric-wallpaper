@@ -1,111 +1,122 @@
-# Music Lyrics Wallpaper
+# 网易云音乐动态歌词壁纸
 
-Wallpaper Engine 动态歌词壁纸（Web Wallpaper）。读取本机 **Now Playing Service** 的播放进度与同步歌词，以"当前句居中、字号最大"的沉浸式歌词为唯一视觉主体。
+基于 [Wallpaper Engine](https://www.wallpaperengine.io/) 的网易云音乐动态歌词壁纸。桌面居中显示当前正在播放的一句歌词，随播放进度逐句滚动，字号最大、沉浸式居中。
 
-**播放/停止行为**：播放歌曲时，歌词场景层淡入显示（0.55s）；停止播放时淡出隐藏（0.9s），露出底层（Wallpaper Engine 中的原壁纸）。暂停视为"在播放"，保留歌词停在当前句。
+项目由**两部分**组成，放在同一个仓库里：
+
+| 目录 | 类型 | 作用 |
+|------|------|------|
+| `server/` | 本地服务端 (Python) | 读取网易云播放状态与歌词，提供 Now Playing API |
+| `src/`（仓库根） | 壁纸前端 (Vite + TypeScript) | Wallpaper Engine 网页壁纸，订阅服务端 API 显示同步歌词 |
+
+> `dist/` 是前端构建产物，也是 Wallpaper Engine 直接导入的内容。
 
 ## 架构
 
 ```text
-网易云音乐 → Now Playing Service(本地) → /query + /api/lyric → 本壁纸
+网易云音乐 (cloudmusic.exe)
+    │
+    ├─ 进程内存读取 ── 进度 / 时长 / 播放状态（偏移自动探测）
+    ├─ 窗口标题枚举 ── 歌名 - 歌手
+    └─ 网易云官方 API ─ 歌曲搜索 + 歌词
+
+server/  (Python, http://127.0.0.1:9863)
+    ├─ GET /query       播放器 + 歌曲状态
+    └─ GET /api/lyric   当前歌曲歌词
+
+壁纸前端  (Wallpaper Engine Web 壁纸)
+    └─ 200ms 轮询 /query 校准进度，切歌时请求 /api/lyric
 ```
+
+## 功能特性
+
+- **内存读取、毫秒级精度**：不依赖 UI Automation，最小化 / 桌面歌词模式下进度依然准确
+- **偏移自动探测**：网易云升级或换电脑后，服务端首次启动自动重定位内存偏移并按版本缓存，无需手动维护
+- **当前句居中、字号最大**：沉浸式歌词，当前行最大字号居中，上下行逐级缩小、降低透明度、加模糊
+- **平滑进度**：前端用本地单调时钟驱动 rAF 渲染，API 只做低频校准，动画不依赖轮询频率
+- **可调参数**：字号、行距、同步偏移、水平/垂直位置、亮度、字体，均可壁纸属性面板即时调节
+
+## 快速开始
+
+### 1. 启动服务端（必需）
+
+```bash
+cd server
+pip install -r requirements.txt
+python nowplaying_server.py
+```
+
+看到 `✓ 偏移已就绪` 即表示已读到网易云。详见 [`server/README.md`](server/README.md)。
+
+### 2. 导入壁纸
+
+- **无需构建**：把仓库里的 `dist/` 文件夹拖入 Wallpaper Engine 的「创建壁纸」窗口，或复制到 `wallpaper_engine/projects/myprojects/`。
+- **自行构建**（需 Node.js）：
+
+  ```bash
+  npm install
+  npm run build      # 产出 dist/
+  ```
+
+导入后播放任意歌曲即可看到同步歌词。
+
+## 属性面板可调参数
+
+在 Wallpaper Engine 里右键壁纸 → **自定义**，或编辑器右侧属性面板：
+
+| 参数 | 键 | 默认 | 范围/选项 | 说明 |
+|------|----|------|-----------|------|
+| 歌词字号 | `fontsize` | 72 | 40–240 | 当前行（最大）字号，其余行按比例缩放 |
+| 行距 | `linegap` | 130 | 70–360 | 相邻两行间距（px） |
+| 歌词同步偏移 | `syncoffset` | 0 | -5000–5000 | 毫秒，正数提前、负数延后 |
+| 歌词水平偏移 | `offsetx` | 0 | -2000–2000 | 歌词块左右移动（px） |
+| 歌词垂直偏移 | `offsety` | 0 | -2000–2000 | 歌词块上下移动（px，正下负上） |
+| 亮度 | `brightness` | 100 | 30–200 | 歌词文字亮度（%，100 = 原始） |
+| 字体 | `font` | 默认 | 微软雅黑/黑体/宋体/楷体 | 歌词字体 |
+
+4K 屏幕（2 倍像素密度）上 72px 偏小，把字号调到 140 左右、行距同步放大即可。调节即时生效（带平滑过渡）。
+
+## 目录结构
 
 ```text
-src/
-├── main.ts                 # 入口：组装各模块，双循环（低频轮询校准 + 高频 rAF 渲染）
-├── scene.ts                # 场景层显隐：播放淡入、停止淡出（CSS transition）
-├── wallpaper.ts            # Wallpaper Engine 环境适配（wallpaperPropertyListener 骨架）
-├── api/
-│   ├── config.ts           # API 端点集中配置（改路径只动这里）
-│   ├── types.ts            # Now Playing API 响应类型
-│   └── nowPlaying.ts       # HTTP 适配器
-├── player/
-│   ├── SyncClock.ts        # 本地时钟：播放推进/暂停停住/平滑校准
-│   └── MusicState.ts       # 状态机：轮询、歌曲变化检测、歌词拉取
-├── lyrics/
-│   ├── parser.ts           # LRC 解析（跳过网易云 JSON 元数据行）+ 翻译合并
-│   ├── timeline.ts         # 播放时间 → 当前行索引（二分）
-│   └── renderer.ts         # 窗口行池渲染：当前句居中、字号最大、平滑滚动
-└── styles/
-    └── main.css            # 布局 + 歌词动画过渡 + 离线遮罩
+lyric-wallpaper/
+├── README.md            本文件
+├── server/              服务端（Python）
+│   ├── README.md
+│   ├── nowplaying_server.py    Now Playing API 服务（端口 9863）
+│   ├── offset_probe.py         播放状态偏移自动探测 + 版本缓存
+│   ├── netease_nowplaying.py   命令行读取当前歌曲
+│   ├── requirements.txt
+│   └── tools/                  21 个开发/验证脚本（研究记录，非运行必需）
+├── src/                 前端源码（Vite + TypeScript）
+│   ├── main.ts          入口：组装模块、双循环
+│   ├── wallpaper.ts     Wallpaper Engine 属性面板适配
+│   ├── scene.ts         场景层淡入淡出
+│   ├── api/             Now Playing API 适配（端点/类型/HTTP）
+│   ├── player/          状态机 + 本地时钟
+│   ├── lyrics/          LRC 解析 + 时间轴 + 渲染器
+│   └── styles/          布局与动画
+├── public/project.json  Wallpaper Engine 壁纸配置（属性面板定义）
+├── index.html           Vite 入口
+├── dist/                构建产物（可直接导入 Wallpaper Engine）
+└── docs/                方案文档 + API 示例
+    ├── wallpaper_engine_now_playing_歌词动态壁纸方案.md
+    └── 获取歌词示例.txt
 ```
 
-## 核心设计
+## 服务端工作原理
 
-**双循环解耦**（动画不依赖 API 轮询）：
-- API：200ms 轮询 `/query`，只做"校准"
-- 渲染：rAF 驱动 `SyncClock.now()`，本地单调时钟平滑推进
-- 暂停 → 时钟停住；恢复 → 继续；拖进度条大跳变 → 直接跳转
+见 [`server/README.md`](server/README.md)。要点：
 
-**渲染器**：固定 7 行 DOM 池，每个元素绑定一个绝对歌词行索引；当前行索引变化时整组平移一格（CSS transition 平滑滚动），滑出窗口的行回收后从另一侧滑入。当前行字号最大居中，上下行逐级缩小并降低透明度、加模糊。默认当前行 72px（上下行 52/38/30px）、行距 130px，均可在壁纸属性面板调节。
+- **播放状态**：读取 `cloudmusic.dll` 内存中的三个 float64 全局变量（进度 / 时长 / 速率）
+- **歌名歌手**：枚举网易云窗口标题 `歌名 - 歌手`（含最小化到托盘的隐藏窗口）
+- **歌词**：网易云官方 API（`music.163.com/api/song/lyric`）
+- **偏移自动探测**：三个字段的地址随版本变化，`offset_probe.py` 用「3 秒内进度 +3 秒」的启发式自动定位，并按版本号（exe 文件版本）缓存到 `offsets_config.json`
 
-## 构建与使用
+## 已知限制
 
-```bash
-npm install
-npm run dev        # 开发调试（浏览器打开 http://localhost:5173）
-npm run build      # 产出 dist/
-```
-
-**导入 Wallpaper Engine**：将 `dist/` 文件夹（含 `index.html`、`assets/`、`project.json`）拖入 Wallpaper Engine 编辑器的 Create Wallpaper，或复制到 `wallpaper_engine\projects\myprojects\`。资源全部本地打包，`base: "./"` 保证 `file://` 加载。
-
-**使用前提**：本机运行 Now Playing Service（端口 9863），并播放网易云音乐。
-
-### 可调参数（属性面板）
-
-导入后，在 Wallpaper Engine 里右键该壁纸 → **自定义**，或在编辑器右侧属性面板，可见以下调节项：
-
-| 参数 | 默认 | 范围/选项 | 说明 |
-|---|---|---|---|
-| **歌词字号** | 72 | 40–240 | 当前行（最大）字号，其余行按比例缩放 |
-| **行距** | 130 | 70–360 | 相邻两行的间距（px） |
-| **垂直位置** | 0 | -400–+400 | 歌词块整体上下移动（px，正值下移、负值上移） |
-| **亮度** | 100 | 30–200 | 歌词文字亮度（百分比，100 = 原始） |
-| **字体** | 默认 | 微软雅黑 / 黑体 / 宋体 / 楷体 | 歌词字体 |
-
-4K 屏幕（2 倍像素密度）上 72px 看起来偏小，把字号调到 140 左右、行距按需同步放大即可。调节即时生效（带平滑过渡），无需重载壁纸。
-
-### 安装到 Wallpaper Engine（另一台机器）
-
-**方式一：直接导入 dist（最简单，无需 Node.js）**
-
-仓库中已包含构建产物 `dist/`。在目标机器上：
-
-1. 克隆或下载本仓库（GitHub 页面 → Code → Download ZIP）
-2. 解压后进入 `dist/` 文件夹，确认里面有 `index.html`、`assets/`、`project.json`
-3. 打开 Wallpaper Engine → 右下角 **创建壁纸（Create Wallpaper）** → 把 `dist/index.html` 拖入弹出的窗口
-4. 壁纸出现在"已安装"标签 → 点击启用
-5. 在目标机器上安装并启动 **Now Playing Service**（端口 9863），播放网易云音乐即可
-
-**方式二：自己构建（需 Node.js）**
-
-```bash
-npm install
-npm run build      # 产出 dist/，之后同上导入
-```
-
-> 提示：如果 `dist/` 与源码不同步（比如改过代码没重新构建），请重新 `npm run build` 后再导入。
-
-## 已验证（自动化测试）
-
-- 真实 API + `file://` 加载：资源路径正确、CORS 无错误、歌词渲染、`wallpaperPropertyListener` 就位
-- 当前句居中（offset=0）且字号最大（56px）
-- 播放推进 → 歌词行逐句平滑滚动
-- 暂停 → 时钟停住不漂移
-- 拖进度条 → 歌词直接跳到正确位置
-- 无歌曲 / API 离线 → 显示 fallback 或离线遮罩，不白屏
-
-## API 端点（本机实测，见根目录方案文档）
-
-| 端点 | 内容 |
-|---|---|
-| `GET /query` | `player.{hasSong,isPaused,seekbarCurrentPosition}` + `track.{id,title,author,...}` |
-| `GET /api/lyric` | `lrc`(LRC文本) + `translatedLyric` + `karaokeLyric` |
-
-CORS 全开放（含 `Origin: null`），Wallpaper Engine 可直接 fetch。
-
-## 下一步
-
-- [x] `wallpaperPropertyListener` 用户属性：歌词字号 / 行距 / 垂直位置 / 亮度 / 字体
-- [ ] 16:9 / 21:9 / 4K 分辨率适配验证（4K 可先靠字号滑块放大）
-- [ ] 多显示器 / Wallpaper Engine FPS 限制适配（`applyGeneralProperties`）
+- 服务端**仅支持 Windows**（读取网易云进程内存依赖 pymem / pywin32）
+- 首次在新版本网易云上运行时，需**正在播放一首歌**才能自动定位偏移
+- VIP 加密歌曲、本地歌曲的歌词可能为空（属网易云服务端限制）
+- 多开网易云时服务端只读取第一个进程
+- 壁纸请求 `http://127.0.0.1:9863`，若服务端改了端口需同步修改 `src/api/config.ts`

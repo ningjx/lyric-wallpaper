@@ -1,0 +1,9 @@
+# 网易云音乐 Now Playing 服务端依赖
+# 安装：pip install -r requirements.txt
+#
+# Windows 专用（读取 cloudmusic.exe 进程内存 + 窗口标题）
+
+pymem       # 必需：进程内存读取（播放进度/时长/播放状态）
+pywin32     # 必需：窗口标题枚举(歌名/歌手) + exe 版本资源读取
+psutil      # 推荐：读取 exe 路径以识别版本（缺失时回退 PE 时间戳 + 镜像大小）
+numpy       # 可选：内存扫描向量化加速（缺失时自动回退纯 Python 扫描）
