@@ -25,7 +25,7 @@ import urllib.parse
 import urllib.request
 import zlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from threading import Lock
+from threading import Lock, Thread
 
 import pymem
 
@@ -101,12 +101,25 @@ class NeteaseMonitor:
         self._last_song_key = None   # 上次歌曲标识 (song|author)，用于切歌检测
         self._last_progress = None   # 上次读取的进度（秒），用于播放/暂停判定
         self._last_progress_at = 0.0  # 上次读取进度的墙钟时间（秒）
+        self._read_lock = Lock()
+        self._status_thread = None
 
     def start(self):
         """启动后台偏移解析线程（幂等，可在 main 中提前调用）"""
         if not self._resolver_started:
             self._resolver_started = True
             self.resolver.start()
+
+    def start_status_monitor(self):
+        """后台轮询播放状态，使终端无需 HTTP 请求也能显示当前歌曲。"""
+        if self._status_thread is None:
+            self._status_thread = Thread(target=self._watch_status, daemon=True)
+            self._status_thread.start()
+
+    def _watch_status(self):
+        while True:
+            self.get_status()
+            time.sleep(0.5)
 
     def attach(self) -> bool:
         try:
@@ -158,9 +171,15 @@ class NeteaseMonitor:
 
     def get_status(self) -> dict | None:
         """获取当前播放状态"""
+        with self._read_lock:
+            return self._get_status()
+
+    def _get_status(self) -> dict | None:
+        """在读取锁内获取当前播放状态。"""
         self.start()  # 确保后台探测线程已启动（幂等）
         offsets = self.resolver.current()
         if offsets is None:
+            console.set_status("等待偏移探测...（请确保网易云正在播放歌曲）")
             return None  # 偏移尚未解析（正在探测/未运行）
         if not self.attach():
             console.set_status("未检测到网易云音乐")
@@ -470,6 +489,7 @@ def main():
     console.log("  端点: /query (状态)  /api/lyric (歌词)")
     console.log("  数据源: 内存读取 (进度/状态) + 网易云 API (歌词)")
     NowPlayingHandler.monitor.start()  # 横幅之后启动后台探测，保证日志顺序
+    NowPlayingHandler.monitor.start_status_monitor()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
