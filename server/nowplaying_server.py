@@ -101,6 +101,8 @@ class NeteaseMonitor:
         self._last_song_key = None   # 上次歌曲标识 (song|author)，用于切歌检测
         self._last_progress = None   # 上次读取的进度（秒），用于播放/暂停判定
         self._last_progress_at = 0.0  # 上次读取进度的墙钟时间（秒）
+        self._playing = True
+        self._stationary_samples = 0
         self._read_lock = Lock()
         self._status_thread = None
 
@@ -193,25 +195,29 @@ class NeteaseMonitor:
                 # 网易云窗口标题格式: '歌名 - 歌手'
                 song, author = title.split(" - ", 1)
 
-            # 播放/暂停判定：以「进度是否随墙钟时间推进」为准。
-            # 原来的 rate（progress+0x8 的 float64）实为播放速度（1.0x），
-            # 暂停时仍保持 1.0，导致暂停漏判（日志一直显示「播放中」）。
+            # 播放/暂停判定：进度在较长采样间隔内连续两次不动才判暂停。
+            # /query 的 200ms 轮询可能比播放器内存刷新更快，不能每次都据此改状态。
             now = time.time()
             if self._last_progress is None:
-                playing = True                  # 首次采样默认播放，下一轮即校正
-            else:
-                elapsed = max(now - self._last_progress_at, 1e-6)
+                self._last_progress = progress
+                self._last_progress_at = now
+            elif now - self._last_progress_at >= 0.35:
+                elapsed = now - self._last_progress_at
                 moved = progress - self._last_progress
-                # 播放中进度约以 1x 速度推进（moved≈elapsed）；暂停/切歌时进度冻结（moved≈0）。
-                # 阈值取 elapsed 一半，兼容 0.5x 以上倍速，也容忍进度条小幅抖动。
-                playing = moved > elapsed * 0.5
-            self._last_progress = progress
-            self._last_progress_at = now
+                if moved > elapsed * 0.15:
+                    self._stationary_samples = 0
+                    self._playing = True
+                else:
+                    self._stationary_samples += 1
+                    if self._stationary_samples >= 2:
+                        self._playing = False
+                self._last_progress = progress
+                self._last_progress_at = now
 
             status = {
                 "progress": progress,
                 "duration": duration,
-                "playing": playing,
+                "playing": self._playing,
                 "song": song.strip(),
                 "author": author.strip(),
                 "has_song": bool(song) and duration > 0,
