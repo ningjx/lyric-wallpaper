@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-网易云音乐 Now Playing API 替代服务
+网易云音乐 / Apple Music Now Playing API 服务
 ====================================
 替代 Widdit/now-playing-service 的本地 API，供 lyric-wallpaper 使用。
 
@@ -9,13 +9,15 @@
   GET /api/lyric  -> 当前歌曲歌词 (LyricsResponse)
 
 数据来源:
-  - 歌曲名/歌手/播放进度/时长/播放状态: cloudmusic.dll 进程内存 (偏移自动探测)
+  - 网易云：cloudmusic.dll 进程内存 (偏移自动探测)
+  - Apple Music：Windows SMTC 媒体会话（歌名、歌手、精确时间线）
   - 歌词: 网易云音乐官方 API (music.163.com/api/song/lyric)
 
 用法:
   python nowplaying_server.py [--port 9863]
 """
 import argparse
+import asyncio
 import json
 import re
 import struct
@@ -28,6 +30,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Lock, Thread
 
 import pymem
+from winrt.windows.media.control import (
+    GlobalSystemMediaTransportControlsSessionManager,
+)
 
 from offset_probe import OffsetResolver
 from console import console
@@ -262,6 +267,130 @@ class NeteaseMonitor:
             f"{pm:02d}:{ps:02d}/{dm:02d}:{ds:02d}")
 
 
+# ============ Apple Music SMTC 监控 ============
+class AppleMusicMonitor:
+    """通过 Windows SMTC 读取 Microsoft Store 版 Apple Music 的播放状态。"""
+
+    def __init__(self):
+        self._status = None
+        self._lock = Lock()
+        self._thread = None
+        self._last_song_key = None
+        self._ready = False
+
+    def start(self):
+        if self._thread is None:
+            self._thread = Thread(target=self._run, daemon=True)
+            self._thread.start()
+
+    def get_status(self) -> dict | None:
+        with self._lock:
+            return self._status.copy() if self._status else None
+
+    def is_initializing(self) -> bool:
+        with self._lock:
+            return not self._ready
+
+    def _run(self):
+        asyncio.run(self._watch())
+
+    async def _watch(self):
+        try:
+            manager = await GlobalSystemMediaTransportControlsSessionManager.request_async()
+            while True:
+                status = await self._read_status(manager)
+                with self._lock:
+                    self._status = status
+                    self._ready = True
+                if status and status["has_song"]:
+                    self._note_playing(status)
+                await asyncio.sleep(0.2)
+        except Exception as exc:
+            console.log(f"Apple Music SMTC 不可用：{exc}")
+
+    async def _read_status(self, manager) -> dict | None:
+        for session in manager.get_sessions():
+            source_id = (session.source_app_user_model_id or "").lower()
+            if "applemusic" not in source_id:
+                continue
+
+            props = await session.try_get_media_properties_async()
+            timeline = session.get_timeline_properties()
+            playback = session.get_playback_info()
+            duration = timeline.end_time.total_seconds()
+            if not props.title or duration <= 0:
+                return None
+
+            # Apple Music 会将专辑拼在 Artist 字段里（“歌手 — 专辑”）。
+            # 歌曲搜索应只使用歌手，避免把专辑名当作查询条件。
+            author = props.artist.split(" — ", 1)[0].strip()
+
+            # Apple Music 的 SMTC 时间线会定期刷新；两次刷新间隔内用时间戳补偿。
+            progress = timeline.position.total_seconds()
+            is_playing = playback.playback_status.name == "PLAYING"
+            if is_playing:
+                try:
+                    elapsed = time.time() - timeline.last_updated_time.timestamp()
+                    progress = min(progress + max(0.0, elapsed), duration)
+                except Exception:
+                    pass
+
+            return {
+                "progress": progress,
+                "duration": duration,
+                "playing": is_playing,
+                "song": props.title.strip(),
+                "author": author,
+                "has_song": True,
+                "source": "applemusic",
+            }
+        return None
+
+    def _note_playing(self, status):
+        key = f"{status['song']}|{status['author']}"
+        if key == self._last_song_key:
+            return
+        self._last_song_key = key
+        console.log(f"Apple Music：正在播放「{status['song']} - {status['author']}」"
+                    f" ({sec_to_human(status['duration'])})")
+
+
+class MusicMonitor:
+    """统一数据源：Apple Music 优先，未播放时回退网易云。"""
+
+    def __init__(self):
+        self.netease = NeteaseMonitor()
+        self.apple_music = AppleMusicMonitor()
+        self._status_thread = None
+
+    def start(self):
+        self.apple_music.start()
+
+    def start_status_monitor(self):
+        if self._status_thread is None:
+            self._status_thread = Thread(target=self._watch_status, daemon=True)
+            self._status_thread.start()
+
+    def _watch_status(self):
+        while True:
+            status = self.get_status()
+            if status and status["has_song"] and status.get("source") == "applemusic":
+                state = "播放中" if status["playing"] else "已暂停"
+                console.set_status(
+                    f"{state}  Apple Music  "
+                    f"{sec_to_human(status['progress'])}/{sec_to_human(status['duration'])}")
+            time.sleep(0.5)
+
+    def get_status(self) -> dict | None:
+        apple_status = self.apple_music.get_status()
+        if apple_status and apple_status["has_song"]:
+            return apple_status
+        # Apple 的首次 SMTC 枚举是异步的；等待首轮结果，避免启动时误触发网易云偏移探测。
+        if self.apple_music.is_initializing():
+            return None
+        return self.netease.get_status()
+
+
 # ============ 网易云 API ============
 class NeteaseApi:
     """网易云音乐官方 API (搜索 + 歌词)"""
@@ -328,7 +457,7 @@ class NeteaseApi:
 
 # ============ HTTP 服务 ============
 class NowPlayingHandler(BaseHTTPRequestHandler):
-    monitor = NeteaseMonitor()
+    monitor = MusicMonitor()
     api = NeteaseApi()
 
     def log_message(self, *args):
@@ -493,7 +622,7 @@ def main():
     server = HTTPServer(("127.0.0.1", args.port), NowPlayingHandler)
     console.log(f"Now Playing API 替代服务已启动: http://127.0.0.1:{args.port}")
     console.log("  端点: /query (状态)  /api/lyric (歌词)")
-    console.log("  数据源: 内存读取 (进度/状态) + 网易云 API (歌词)")
+    console.log("  数据源: Apple Music SMTC / 网易云内存读取 + 网易云 API (歌词)")
     NowPlayingHandler.monitor.start()  # 横幅之后启动后台探测，保证日志顺序
     NowPlayingHandler.monitor.start_status_monitor()
     try:

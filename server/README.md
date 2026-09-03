@@ -1,6 +1,6 @@
-# wyyyy lyric server — 网易云音乐 Now Playing 服务
+# lyric-wallpaper server — 网易云音乐 / Apple Music Now Playing 服务
 
-为同仓库的壁纸前端（`wallpaper/src/`，Wallpaper Engine 歌词壁纸）提供网易云音乐播放状态与歌词的本地服务，替代 [Widdit/now-playing-service](https://github.com/Widdit/now-playing-service)。
+为同仓库的壁纸前端（`wallpaper/src/`，Wallpaper Engine 歌词壁纸）提供网易云音乐或 Microsoft Store 版 Apple Music 的播放状态与歌词的本地服务，替代 [Widdit/now-playing-service](https://github.com/Widdit/now-playing-service)。
 
 **核心价值**：原 now-playing-service 通过 UI Automation 读取播放进度，最小化/桌面歌词模式下经常读不到。本项目改用**进程内存读取**，精度毫秒级、任何窗口状态都可用。
 
@@ -21,6 +21,13 @@
     └─ [HTTP API] music.163.com
           ├─ 搜索: /api/search/get/web  → 歌曲 ID/专辑/封面
           └─ 歌词: /api/song/lyric      → LRC 歌词
+
+Apple Music (Microsoft Store)
+    │
+    └─ [Windows SMTC] 系统媒体会话
+          ├─ 歌名 / 歌手
+          ├─ 播放 / 暂停
+          └─ Timeline：当前进度 / 总时长（支持拖动进度条同步）
 
 nowplaying_server.py (HTTP 服务, 127.0.0.1:9863)
     │
@@ -181,6 +188,7 @@ pymem        # 进程内存读取（必需）
 pywin32      # 窗口枚举 (win32gui) + exe 版本读取（必需）
 psutil       # 读取 exe 路径识别版本（推荐，缺失回退 PE 时间戳）
 numpy        # 偏移探测的向量化扫描（可选，缺失回退纯 Python）
+winrt-Windows.Media.Control  # Apple Music 的 Windows SMTC（必需）
 
 也可直接 `pip install -r requirements.txt`。
 ```

@@ -7,3 +7,4 @@ pymem       # 必需：进程内存读取（播放进度/时长/播放状态）
 pywin32     # 必需：窗口标题枚举(歌名/歌手) + exe 版本资源读取
 psutil      # 推荐：读取 exe 路径以识别版本（缺失时回退 PE 时间戳 + 镜像大小）
 numpy       # 可选：内存扫描向量化加速（缺失时自动回退纯 Python 扫描）
+winrt-Windows.Media.Control  # Apple Music：Windows SMTC（歌名、歌手、进度、时长）

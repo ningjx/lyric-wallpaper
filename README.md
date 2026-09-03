@@ -1,4 +1,4 @@
-# 网易云音乐动态歌词壁纸
+# 网易云音乐 / Apple Music 动态歌词壁纸
 
 基于 [Wallpaper Engine](https://www.wallpaperengine.io/) 的网易云音乐动态歌词壁纸。桌面居中显示当前正在播放的一句歌词，随播放进度逐句滚动，字号最大、沉浸式居中。
 
@@ -6,7 +6,7 @@
 
 | 目录 | 类型 | 作用 |
 |------|------|------|
-| `server/` | 本地服务端 (Python) | 读取网易云播放状态与歌词，提供 Now Playing API |
+| `server/` | 本地服务端 (Python) | 读取网易云或 Apple Music 播放状态与歌词，提供 Now Playing API |
 | `wallpaper/` | 壁纸前端源码 (Vite + TypeScript) | Wallpaper Engine 网页壁纸，订阅服务端 API 显示同步歌词 |
 
 > 一眼看懂：`wallpaper/` 是壁纸源码，`server/` 是服务端，`docs/` 是文档。壁纸构建产物**不入库**，由 GitHub Actions 打 tag 时自动构建发布（见 [Releases](https://github.com/ningjx/lyric-wallpaper/releases)）。
@@ -14,11 +14,11 @@
 ## 架构
 
 ```text
-网易云音乐 (cloudmusic.exe)
+网易云音乐 (cloudmusic.exe) / Apple Music
     │
-    ├─ 进程内存读取 ── 进度 / 时长 / 播放状态（偏移自动探测）
-    ├─ 窗口标题枚举 ── 歌名 - 歌手
-    └─ 网易云官方 API ─ 歌曲搜索 + 歌词
+    ├─ 网易云：进程内存读取 ── 进度 / 时长 / 播放状态（偏移自动探测）
+    ├─ Apple Music：Windows SMTC ── 歌名 / 歌手 / 精确进度 / 时长
+    └─ 网易云官方 API ─ 歌曲搜索 + 歌词（Apple Music 同样复用）
 
 server/  (Python, http://127.0.0.1:9863)
     ├─ GET /query       播放器 + 歌曲状态
@@ -30,7 +30,7 @@ server/  (Python, http://127.0.0.1:9863)
 
 ## 功能特性
 
-- **内存读取、毫秒级精度**：不依赖 UI Automation，最小化 / 桌面歌词模式下进度依然准确
+- **双平台读取**：网易云使用内存读取；Microsoft Store 版 Apple Music 使用 Windows SMTC 的精确时间线
 - **偏移自动探测**：网易云升级或换电脑后，服务端首次启动自动重定位内存偏移并按版本缓存，无需手动维护
 - **当前句居中、字号最大**：沉浸式歌词，当前行最大字号居中，上下行逐级缩小、降低透明度、加模糊
 - **平滑进度**：前端用本地单调时钟驱动 rAF 渲染，API 只做低频校准，动画不依赖轮询频率
@@ -46,7 +46,7 @@ pip install -r requirements.txt
 python nowplaying_server.py
 ```
 
-看到 `✓ 偏移已就绪` 即表示已读到网易云。详见 [`server/README.md`](server/README.md)。
+看到当前播放歌曲即表示已连接：网易云会显示 `✓ 服务就绪`，Apple Music 会显示 `Apple Music`。详见 [`server/README.md`](server/README.md)。
 
 ### 2. 导入壁纸
 
@@ -133,7 +133,7 @@ git push origin v1.0.0
 
 见 [`server/README.md`](server/README.md)。要点：
 
-- **播放状态**：读取 `cloudmusic.dll` 内存中的进度 / 时长两个 float64 全局变量，播放/暂停由「进度是否随墙钟时间推进」判断（暂停时进度冻结）
+- **播放状态**：网易云读取 `cloudmusic.dll` 内存；Apple Music 读取 Windows SMTC 的媒体会话及时间线
 - **歌名歌手**：枚举网易云窗口标题 `歌名 - 歌手`（含最小化到托盘的隐藏窗口）
 - **歌词**：网易云官方 API（`music.163.com/api/song/lyric`）
 - **偏移自动探测**：三个字段的地址随版本变化，`offset_probe.py` 用「3 秒内进度 +3 秒」的启发式自动定位，并按版本号（exe 文件版本）缓存到 `offsets_config.json`
