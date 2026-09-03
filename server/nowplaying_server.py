@@ -30,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Lock, Thread
 
 import pymem
+import psutil
 from winrt.windows.media.control import (
     GlobalSystemMediaTransportControlsSessionManager,
 )
@@ -59,6 +60,11 @@ def sec_to_human(sec: float) -> str:
     """秒 -> MM:SS 字符串"""
     sec = max(0, int(sec))
     return f"{sec // 60:02d}:{sec % 60:02d}"
+
+
+def truncate_text(text: str, limit: int = 36) -> str:
+    """状态栏使用的单行标题，避免超长歌名淹没播放进度。"""
+    return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
 def human_to_sec(text: str) -> float:
@@ -109,6 +115,8 @@ class NeteaseMonitor:
         self._playing = True
         self._stationary_samples = 0
         self._read_lock = Lock()
+        self._status_lock = Lock()
+        self._cached_status = None
         self._status_thread = None
 
     def start(self):
@@ -118,15 +126,29 @@ class NeteaseMonitor:
             self.resolver.start()
 
     def start_status_monitor(self):
-        """后台轮询播放状态，使终端无需 HTTP 请求也能显示当前歌曲。"""
+        """在独立线程中轮询网易云，并维护最近一次状态快照。"""
         if self._status_thread is None:
             self._status_thread = Thread(target=self._watch_status, daemon=True)
             self._status_thread.start()
 
     def _watch_status(self):
         while True:
-            self.get_status()
-            time.sleep(0.5)
+            status = self.get_status() if self.is_running() else None
+            with self._status_lock:
+                self._cached_status = status
+            time.sleep(0.2)
+
+    def get_cached_status(self) -> dict | None:
+        with self._status_lock:
+            return self._cached_status.copy() if self._cached_status else None
+
+    @staticmethod
+    def is_running() -> bool:
+        try:
+            return any((proc.info["name"] or "").lower() == PROCESS_NAME
+                       for proc in psutil.process_iter(["name"]))
+        except Exception:
+            return False
 
     def attach(self) -> bool:
         try:
@@ -186,10 +208,8 @@ class NeteaseMonitor:
         self.start()  # 确保后台探测线程已启动（幂等）
         offsets = self.resolver.current()
         if offsets is None:
-            console.set_status("等待偏移探测...（请确保网易云正在播放歌曲）")
             return None  # 偏移尚未解析（正在探测/未运行）
         if not self.attach():
-            console.set_status("未检测到网易云音乐")
             return None
         try:
             progress = self.read_float(offsets["progress"])
@@ -227,11 +247,6 @@ class NeteaseMonitor:
                 "author": author.strip(),
                 "has_song": bool(song) and duration > 0,
             }
-            if status["has_song"]:
-                self._note_playing(status)
-                self._update_status(status)
-            else:
-                console.set_status("等待播放...")
             return status
         except Exception:
             return None
@@ -356,15 +371,20 @@ class AppleMusicMonitor:
 
 
 class MusicMonitor:
-    """统一数据源：Apple Music 优先，未播放时回退网易云。"""
+    """读取各播放器的独立状态快照，并按播放状态与最近状态变化仲裁输出。"""
 
     def __init__(self):
         self.netease = NeteaseMonitor()
         self.apple_music = AppleMusicMonitor()
         self._status_thread = None
+        self._selection_lock = Lock()
+        self._last_state = {}
+        self._last_transition_at = {}
+        self._last_announced_netease_song = None
 
     def start(self):
         self.apple_music.start()
+        self.netease.start_status_monitor()
 
     def start_status_monitor(self):
         if self._status_thread is None:
@@ -374,22 +394,48 @@ class MusicMonitor:
     def _watch_status(self):
         while True:
             status = self.get_status()
-            if status and status["has_song"] and status.get("source") == "applemusic":
+            if status and status["has_song"]:
+                if status["source"] == "netease":
+                    song_key = f"{status['song']}|{status['author']}"
+                    if song_key != self._last_announced_netease_song:
+                        self._last_announced_netease_song = song_key
+                        console.log(f"网易云音乐：当前歌曲「{status['song']} - {status['author']}」"
+                                    f" ({sec_to_human(status['duration'])})")
                 state = "播放中" if status["playing"] else "已暂停"
+                platform = "Apple Music" if status["source"] == "applemusic" else "网易云音乐"
                 console.set_status(
-                    f"{state}  Apple Music  "
+                    f"{state}  {platform}  {truncate_text(status['song'])}  "
                     f"{sec_to_human(status['progress'])}/{sec_to_human(status['duration'])}")
             time.sleep(0.5)
 
     def get_status(self) -> dict | None:
         apple_status = self.apple_music.get_status()
-        if apple_status and apple_status["has_song"]:
-            return apple_status
         # Apple 的首次 SMTC 枚举是异步的；等待首轮结果，避免启动时误触发网易云偏移探测。
         if self.apple_music.is_initializing():
             return None
-        return self.netease.get_status()
 
+        netease_status = self.netease.get_cached_status()
+        if netease_status:
+            netease_status = {**netease_status, "source": "netease"}
+
+        statuses = [status for status in (apple_status, netease_status)
+                    if status and status["has_song"]]
+        if not statuses:
+            return None
+
+        with self._selection_lock:
+            for status in statuses:
+                source = status["source"]
+                state = (status["playing"], status["song"], status["author"])
+                if self._last_state.get(source) != state:
+                    self._last_state[source] = state
+                    self._last_transition_at[source] = time.monotonic()
+
+            # 有播放器正在播放时只在它们之间选择；否则在暂停的播放器之间选择。
+            playing = [status for status in statuses if status["playing"]]
+            candidates = playing or statuses
+            return max(candidates,
+                       key=lambda status: self._last_transition_at.get(status["source"], 0.0))
 
 # ============ 网易云 API ============
 class NeteaseApi:
