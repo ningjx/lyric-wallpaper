@@ -39,9 +39,15 @@ server 包 (aiohttp 异步服务, 127.0.0.1:9863)
 
 ## 快速开始
 
+> ⚠️ `server/` 是 Python 包，`python -m server` 需在**仓库根目录**运行（不是 `server/` 内，相对导入需要父目录）。在 `server/` 内可用 `python run.py`。
+
 ```bash
-pip install -r requirements.txt
-python -m server                       # 默认端口 9863
+# 方式一（推荐）：仓库根目录
+pip install -r server/requirements.txt
+python -m server                         # 默认端口 9863
+
+# 方式二：在 server/ 目录内
+python run.py                            # 便捷入口，等价于上面
 ```
 
 可选：`--port` / `--host` / `--config config.json` / `--token`。缺省时与旧服务行为一致，壁纸前端无需任何改动（端口和 `/query`、`/api/lyric` 响应格式完全兼容）。

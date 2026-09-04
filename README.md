@@ -42,10 +42,11 @@ server/  (Python, aiohttp 异步, http://127.0.0.1:9863)
 
 ### 1. 启动服务端（必需）
 
+`server/` 是 Python 包，需在**仓库根目录**用 `-m` 启动（勿在 `server/` 目录内运行，否则相对导入会失败）；在 `server/` 内也可用 `python run.py`：
+
 ```bash
-cd server
-pip install -r requirements.txt
-python -m server
+pip install -r server/requirements.txt
+python -m server        # 在仓库根目录
 ```
 
 看到当前播放歌曲即表示已连接：网易云会显示 `✓ 服务就绪`，Apple Music 会显示 `Apple Music`。详见 [`server/README.md`](server/README.md)。
