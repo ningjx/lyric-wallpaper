@@ -72,6 +72,16 @@ def find_module(pm):
     return None, 0
 
 
+def process_exists() -> bool:
+    """网易云进程是否在运行。目标进程不存在属常态（非异常），安静等待即可。"""
+    try:
+        import psutil
+        return any((p.info["name"] or "").lower() == PROCESS_NAME
+                   for p in psutil.process_iter(["name"]))
+    except Exception:
+        return True  # 无法判断时交给 pymem 尝试，避免误判成「不存在」而空转
+
+
 def read_version(pm, size=0, base=None):
     """读取网易云版本号（用作缓存键）。优先 cloudmusic.exe 文件版本。"""
     try:
@@ -263,7 +273,8 @@ class OffsetResolver:
         self._thread = None
         self._stop = False
         self._started = False
-        self._state = "idle"  # idle / probing / ready / failed / stopped
+        self._state = "idle"  # idle / waiting / probing / ready / failed / stopped
+        self._last_log_key = ""  # 日志去重：同一状态只报一次，避免后台轮询刷屏
         # 缓存仍在 server/ 根目录（与旧版本一致），换路径会让老用户重复探测一次
         self._config_path = config_path or os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -274,7 +285,7 @@ class OffsetResolver:
             return self._offsets
 
     def offset_state(self):
-        """对外暴露探测状态（/healthz）：idle/probing/ready/failed/stopped"""
+        """对外暴露探测状态（/healthz）：idle/waiting/probing/ready/failed/stopped"""
         with self._lock:
             return self._state
 
@@ -336,47 +347,64 @@ class OffsetResolver:
         except Exception:
             return False
 
+    def _log_once(self, key: str, text: str) -> None:
+        """按状态去重：同一状态只打印一条，避免后台轮询反复刷屏。「检测到就用，检测不到拉倒」。"""
+        if self._last_log_key == key:
+            return
+        self._last_log_key = key
+        log(text)
+
     def _run(self):
         backoff = 10.0
         self._set_state("probing")
         while not self._stop:
             pm = None
             try:
+                # 进程/依赖不存在属常态：安静等待，不当作异常
+                if not process_exists():
+                    self._set_state("waiting")
+                    self._log_once("wait", "等待网易云运行（检测到即启用）...")
+                    time.sleep(backoff)
+                    continue
+
                 pm = pymem.Pymem(PROCESS_NAME)
                 base, size = find_module(pm)
                 if base is None:
-                    self._set_state("probing")
-                    log("等待网易云运行...")
+                    self._set_state("waiting")
+                    self._log_once("wait", "未找到 cloudmusic.dll，等待...")
                     time.sleep(backoff)
                     continue
 
                 ver = read_version(pm, size, base)
                 self._set_state("probing")
-                log(f"检测到版本: {ver}")
+                self._log_once(f"ver:{ver}", f"检测到版本: {ver}")
 
                 off = self._load_store().get(ver)
                 if off and self._validate(pm, base, off):
                     self._set_offsets(dict(off))
                     self._set_state("ready")
+                    self._last_log_key = ""  # 就绪后重置，切歌/下次切换可再报
                     log(f"✓ 偏移已就绪 (progress=0x{off['progress']:X} "
                         f"duration=0x{off['duration']:X} rate=0x{off['rate']:X})")
                     return
 
-                log("偏移失效或未知版本，开始自动探测（请确保正在播放歌曲）...")
+                self._log_once(f"probe:{ver}", "偏移失效或未知版本，开始自动探测（请确保正在播放歌曲）...")
                 off = probe(pm)
                 if off:
                     self._set_offsets(off)
                     self._set_state("ready")
                     self._save(ver, off)
+                    self._last_log_key = ""
                     log(f"✓ 偏移已就绪 (progress=0x{off['progress']:X} "
                         f"duration=0x{off['duration']:X} rate=0x{off['rate']:X})")
                     return
 
-                log(f"探测失败（可能未播放），{backoff:.0f}s 后重试")
+                self._log_once(f"fail:{ver}", "探测失败（可能未在播放），静默重试")
                 time.sleep(backoff)
                 backoff = min(backoff * 1.5, 60.0)
             except Exception as e:
-                log(f"解析过程异常: {e}，{backoff:.0f}s 后重试")
+                self._set_state("failed")
+                self._log_once(f"err:{type(e).__name__}", f"偏移解析异常: {e}，静默重试")
                 time.sleep(backoff)
                 backoff = min(backoff * 1.5, 60.0)
             finally:

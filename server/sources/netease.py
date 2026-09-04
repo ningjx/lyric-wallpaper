@@ -15,6 +15,7 @@ from __future__ import annotations
 import struct
 import time
 
+from ..console import console
 from ..core.state import RawSnapshot
 from ..probing.offset_probe import OffsetResolver
 from .base import PollingSource
@@ -40,6 +41,9 @@ class NeteaseSource(PollingSource):
         self._last_progress_at = 0.0
         self._stationary_samples = 0
         self._playing = True
+        # 一次性提示：就绪/切歌各说一句（目标进程缺席时保持安静）
+        self._announced = False
+        self._last_song_key: tuple | None = None
 
     def start(self) -> None:
         # 偏移探测是独立后台线程；即使版本未知/未探测完成，服务照常可提供 Apple 源
@@ -60,6 +64,8 @@ class NeteaseSource(PollingSource):
             if " - " in title:
                 song, author = title.split(" - ", 1)
             playing = self._classify(progress)
+            if song.strip() and duration > 0:
+                self._note_playing(song.strip(), author.strip(), duration)
             return RawSnapshot(
                 source="netease", playing=playing, progress=progress,
                 duration=duration, song=song.strip(), author=author.strip(),
@@ -118,6 +124,19 @@ class NeteaseSource(PollingSource):
         self._last_progress = progress
         self._last_progress_at = now
         return self._playing
+
+    def _note_playing(self, song: str, author: str, duration: float) -> None:
+        """就绪/切歌各打一条（一次性）。目标进程缺席时本方法根本不触发。"""
+        key = (song, author)
+        if key == self._last_song_key:
+            return
+        self._last_song_key = key
+        m, s = divmod(int(duration), 60)
+        if self._announced:
+            console.log(f"▶ 网易云切歌：正在播放「{song} - {author}」 ({m:02d}:{s:02d})")
+        else:
+            self._announced = True
+            console.log(f"✓ 网易云就绪：正在播放「{song} - {author}」 ({m:02d}:{s:02d})")
 
     # ---- 窗口标题（歌名 - 歌手） ----
     def _get_title(self, duration: float) -> str:

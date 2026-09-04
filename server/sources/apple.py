@@ -69,6 +69,7 @@ class AppleMusicSource(PlayerSource):
 
     async def _watch(self) -> None:
         backoff = 1.0
+        unavailable_announced = False
         while not self._stop.is_set():
             try:
                 manager = await (
@@ -76,6 +77,9 @@ class AppleMusicSource(PlayerSource):
                     .request_async())
                 self._ready = True
                 self._health = "ok"
+                if unavailable_announced:
+                    unavailable_announced = False
+                    console.log("Apple Music SMTC 已恢复")
                 while not self._stop.is_set():
                     status = await self._read_status(manager)
                     if status is not None:
@@ -86,12 +90,14 @@ class AppleMusicSource(PlayerSource):
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                # SMTC 偶发不可用（睡眠/锁屏/会话损坏）：退避重试，不退出
+                # SMTC 偶发不可用（睡眠/锁屏/会话损坏）：退避重试；只在
+                # 「可用→不可用」切换时报一次，静默重试，恢复时报「已恢复」。
                 self._ready = False
                 self._health = "degraded"
                 self._last_error = str(exc)
-                console.log(
-                    f"Apple Music SMTC 暂不可用：{exc}，{backoff:.0f}s 后重试")
+                if not unavailable_announced:
+                    unavailable_announced = True
+                    console.log(f"Apple Music SMTC 暂不可用（静默重试，检测到即恢复）: {exc}")
                 try:
                     await asyncio.sleep(backoff)
                 except asyncio.CancelledError:
