@@ -29,32 +29,44 @@ Apple Music (Microsoft Store)
           ├─ 播放 / 暂停
           └─ Timeline：当前进度 / 总时长（支持拖动进度条同步）
 
-nowplaying_server.py (HTTP 服务, 127.0.0.1:9863)
+server 包 (aiohttp 异步服务, 127.0.0.1:9863)
     │
-    ├─ GET /query      → 播放器+歌曲状态 (前端每 200ms 轮询校准)
-    └─ GET /api/lyric  → LRC 歌词 (前端仅切歌时请求)
+    ├─ GET /query      → 播放器+歌曲状态（兼容原服务格式）
+    ├─ GET /api/lyric  → LRC 歌词（兼容原服务格式，source 为实际 provider）
+    ├─ GET /sse        → 状态/切歌实时推送（可选，配合前端降频）
+    └─ GET /healthz, /metrics
 ```
 
 ## 快速开始
 
 ```bash
 pip install -r requirements.txt
-python nowplaying_server.py            # 默认端口 9863
+python -m server                       # 默认端口 9863
 ```
 
-启动后壁纸前端无需任何改动即可使用（端口和响应格式与原服务完全兼容）。
+可选：`--port` / `--host` / `--config config.json` / `--token`。缺省时与旧服务行为一致，壁纸前端无需任何改动（端口和 `/query`、`/api/lyric` 响应格式完全兼容）。
 
 ## 文件说明
 
-### 核心文件（生产使用）
+### 核心模块（生产使用）
 
-| 文件 | 作用 |
+`server/` 是 Python 包，入口 `python -m server`：
+
+| 模块 | 作用 |
 |------|------|
-| `nowplaying_server.py` | **主程序**。HTTP 服务 + 内存读取 + 歌词 API 三合一。启动它即可替代 Now Playing Service |
-| `netease_nowplaying.py` | 命令行版实时监控（无 HTTP 服务）。轮询/JSON/HTTP 三种模式，用于调试或脚本集成 |
-| `offset_probe.py` | **偏移自动探测模块**。按版本缓存偏移，失效时自动扫描内存重定位，服务启动即用 |
+| `__main__.py` / `server.py` | 入口与生命周期：装配组件、启动 aiohttp、优雅关闭 |
+| `config.py` | dataclass 默认配置 + 可选 `config.json` 覆盖（命令行 > 配置文件 > 默认值） |
+| `core/` | 状态存储（单写者，工作线程投递 → 事件循环仲裁）、多源仲裁、/query 负载、指标 |
+| `sources/` | 数据源抽象（PlayerSource）+ 网易云内存读取 + Apple SMTC，工作线程轮询，故障自隔离 |
+| `lyrics/` | **可插拔歌词体系**：搜索器（TrackSearcher）+ Provider 链（LocalFile/Netease）+ 熔断/冷却/负缓存 + 内存/磁盘缓存 + 切歌解析编排 |
+| `web/` | aiohttp 路由：`/query` `/api/lyric`（兼容）`/sse` `/healthz` `/metrics`，CORS/Token |
+| `probing/offset_probe.py` | **偏移自动探测**。按版本缓存偏移，失效时自动扫描内存重定位，暴露 `offset_state` 供诊断 |
 | `offsets_config.json` | 偏移缓存（自动生成）。记录各版本探测出的偏移，换电脑/升级后首次启动自动重建 |
-| `tools/mem_scan.py` | 手动重定位工具（`offset_probe.py` 的原始版，仅调试用）。自动探测失败时可用它手工定位 |
+| `requirements*.txt` | 依赖拆分：`requirements-core.txt`（必需）/ `requirements-apple.txt`（可选 winrt）/ `requirements-dev.txt`（测试） |
+| `tools/mem_scan.py` | 手动重定位工具（历史脚本，仅调试用）。自动探测失败时可用它手工定位 |
+
+**新增播放器数据源** = 实现 `PlayerSource` 子类，在 `sources/registry.py` 注册一行。
+**新增歌词源** = 实现 `LyricsProvider` 子类（如用 QQ/Kugou API），在 `config.lyrics.provider_order` 里加入即可，HTTP 层与前端不动。
 
 ### 研究/实验脚本（`tools/` 目录，仅供理解原理）
 
@@ -155,7 +167,7 @@ url = f"https://music.163.com/api/song/lyric?id={song_id}&lv=-1&kv=-1&tv=-1"
 
 ### 网易云升级/换电脑后偏移失效怎么办
 
-**无需手动处理。** `nowplaying_server.py` / `netease_nowplaying.py` 启动时：
+**无需手动处理。** 服务启动时：
 
 1. 读取 cloudmusic.dll 版本号，查 `offsets_config.json` 缓存
 2. 版本匹配且偏移合法 → 直接使用
@@ -184,11 +196,13 @@ url = f"https://music.163.com/api/song/lyric?id={song_id}&lv=-1&kv=-1&tv=-1"
 
 ```
 Python >= 3.10
+aiohttp      # 异步 HTTP 服务与客户端（必需）
 pymem        # 进程内存读取（必需）
 pywin32      # 窗口枚举 (win32gui) + exe 版本读取（必需）
-psutil       # 读取 exe 路径识别版本（推荐，缺失回退 PE 时间戳）
-numpy        # 偏移探测的向量化扫描（可选，缺失回退纯 Python）
-winrt-Windows.Media.Control  # Apple Music 的 Windows SMTC（必需）
+psutil       # 读取 exe 路径识别版本（必需）
+numpy        # 偏移探测的向量化扫描（必需）
+winrt-Windows.Media.Control  # Apple Music 的 Windows SMTC（可选，缺失时 Apple 源自动停用）
 
-也可直接 `pip install -r requirements.txt`。
+核心安装：pip install -r requirements-core.txt
+含 Apple：pip install -r requirements.txt
 ```

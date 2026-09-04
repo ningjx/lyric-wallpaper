@@ -12,10 +12,10 @@ cloudmusic.dll 播放状态偏移自动探测模块
   - 时长在进度 +~0x60000 附近，是「>进度 且两帧不变」的稳定 float64。
 
 用法：
-  from offset_probe import OffsetResolver
   resolver = OffsetResolver()
-  resolver.start()          # 后台线程：先试缓存，失败则自动探测
-  offsets = resolver.current()   # dict {"progress","duration","rate"} 或 None（探测中）
+  resolver.start()              # 后台线程：先试缓存，失败则自动探测
+  offsets = resolver.current()  # dict {"progress","duration","rate"} 或 None（探测中）
+  resolver.offset_state()       # "idle"|"probing"|"ready"|"failed"（供 /healthz）
 """
 import json
 import math
@@ -31,8 +31,6 @@ MODULE_NAME = "cloudmusic.dll"
 
 # 内置已知版本偏移，作为缓存默认值和快速路径。
 # 缓存键用 cloudmusic.exe 的 FileVersion（程序可读）。
-# About 对话框显示的 "Build:205135" 与 FileVersion "3.1.28.8527" 是同一构建，
-# 但 "Build:205135" 不通过标准版本资源暴露，程序读不到，故以 FileVersion 为键。
 KNOWN_OFFSETS = {
     "3.1.28.8527": {   # 对应 About 显示的 3.1.28 (Build:205135)
         "progress": 0x1D808F8,
@@ -42,24 +40,24 @@ KNOWN_OFFSETS = {
 }
 
 # 探测参数
-PROGRESS_MIN = 0.0        # 进度下限（秒）
-PROGRESS_MAX = 3600.0     # 进度上限（秒）
-DELTA_LO = 2.5            # 3 秒内进度增量下限（严格，1.0x 速度）
-DELTA_HI = 3.5            # 3 秒内进度增量上限
-DELTA_LO_LOOSE = 1.5      # 宽松下限（兼容倍速播放）
-DELTA_HI_LOOSE = 5.5      # 宽松上限
-DURATION_NEAR = 0x60000   # 时长字段距进度的期望距离
-DURATION_TOL = 0x20000    # 时长搜索窗 ±
-SNAP_WAIT = 3.0           # 两帧快照间隔
+PROGRESS_MIN = 0.0
+PROGRESS_MAX = 3600.0
+DELTA_LO = 2.5
+DELTA_HI = 3.5
+DELTA_LO_LOOSE = 1.5
+DELTA_HI_LOOSE = 5.5
+DURATION_NEAR = 0x60000
+DURATION_TOL = 0x20000
+SNAP_WAIT = 3.0
 CONFIG_NAME = "offsets_config.json"
 
 
-def log(msg: str):
+def log(msg: str) -> None:
     """后台线程内安全打印（经共享控制台，避免打断底部状态行）"""
     try:
-        from console import console
+        from ..console import console
         console.log(f"[offset-probe] {msg}")
-    except Exception:
+    except Exception:  # 独立运行时包不可导入，退回纯终端打印
         print(f"[offset-probe] {msg}", flush=True)
 
 
@@ -75,12 +73,7 @@ def find_module(pm):
 
 
 def read_version(pm, size=0, base=None):
-    """读取网易云版本号（用作缓存键）。
-
-    cloudmusic.dll 无版本资源，故优先读 cloudmusic.exe 的文件版本；
-    失败则回退到 dll 的 PE 编译时间戳 + 镜像大小，再回退到镜像大小。
-    """
-    # 1) cloudmusic.exe 文件版本（最可靠，如 3.1.28.8527）
+    """读取网易云版本号（用作缓存键）。优先 cloudmusic.exe 文件版本。"""
     try:
         import psutil
         exe = psutil.Process(pm.process_id).exe()
@@ -93,7 +86,6 @@ def read_version(pm, size=0, base=None):
     except Exception:
         pass
 
-    # 2) dll 的 PE 编译时间戳 + 镜像大小（dll 无版本资源时的可靠指纹）
     if base:
         try:
             e_lfanew = struct.unpack("<I", pm.read_bytes(base + 0x3C, 4))[0]
@@ -102,7 +94,6 @@ def read_version(pm, size=0, base=None):
         except Exception:
             pass
 
-    # 3) 最后回退：仅镜像大小
     return f"size_{size:x}"
 
 
@@ -118,15 +109,11 @@ def _read_image(pm, base, size):
             try:
                 buf[off:off + n] = pm.read_bytes(base + off, n)
             except Exception:
-                pass  # 保留为 0
+                pass
         return bytes(buf)
 
 
 def _scan_progress(data1, data2):
-    """找进度候选（字节偏移列表）。优先 numpy 向量化，回退纯 Python。
-
-    返回 [byte_offset, ...]，其中 byte_offset = 相对 DLL 基址的偏移。
-    """
     hits = _scan_strict(data1, data2)
     if hits:
         return hits
@@ -134,7 +121,8 @@ def _scan_progress(data1, data2):
 
 
 def _scan_strict(data1, data2):
-    return _scan_impl(data1, data2, DELTA_LO, DELTA_HI, rate_check=lambda r: 0.99 <= r <= 1.01)
+    return _scan_impl(data1, data2, DELTA_LO, DELTA_HI,
+                      rate_check=lambda r: 0.99 <= r <= 1.01)
 
 
 def _scan_loose(data1, data2):
@@ -144,10 +132,10 @@ def _scan_loose(data1, data2):
 
 def _scan_impl(data1, data2, delta_lo, delta_hi, rate_check):
     """核心扫描：找 val∈[PROGRESS_MIN,PROGRESS_MAX] 且 Δ∈[delta_lo,delta_hi]
-    且 +0x8 处速率满足 rate_check 的 float64，返回字节偏移列表。"""
+    且 +0x8 处速率满足 rate_check 的 float64，返回字节偏移列表。
+    numpy 为必需依赖（向量化，快两个数量级）；缺 numpy 掉回纯 Python。"""
     hits = []
 
-    # 尝试 numpy
     try:
         import numpy as np
     except ImportError:
@@ -168,7 +156,7 @@ def _scan_impl(data1, data2, delta_lo, delta_hi, rate_check):
                 hits.append(int(i) * 8)
         return hits
 
-    # 纯 Python 回退
+    # 纯 Python 回退（慢，仅 numpy 缺失时）
     n = len(data1) - 8
     n2 = len(data2) - 8
     for i in range(0, n + 1, 8):
@@ -186,7 +174,6 @@ def _scan_impl(data1, data2, delta_lo, delta_hi, rate_check):
 
 
 def _find_duration(data1, data2, progress_off, cur_progress):
-    """在 progress_off + ~0x60000 附近找时长：稳定(两帧不变)且 >进度 且合理区间"""
     lo = progress_off + DURATION_NEAR - DURATION_TOL
     hi = progress_off + DURATION_NEAR + DURATION_TOL
     best_off = None
@@ -197,7 +184,7 @@ def _find_duration(data1, data2, progress_off, cur_progress):
         if not (math.isfinite(v1) and 10.0 <= v1 <= 86400.0 and v1 > cur_progress):
             continue
         v2 = struct.unpack_from("<d", data2, i)[0]
-        if abs(v1 - v2) < 0.001:  # 两帧不变 => 稳定字段
+        if abs(v1 - v2) < 0.001:
             dist = abs(i - (progress_off + DURATION_NEAR))
             if dist < best_dist:
                 best_dist = dist
@@ -230,7 +217,6 @@ def probe(pm):
         return None
     log(f"进度候选 {len(hits)} 个")
 
-    # 逐个候选定位时长，取「有稳定时长字段」的最佳候选
     best = None
     for off in hits:
         cur = struct.unpack_from("<d", data2, off)[0]
@@ -253,7 +239,6 @@ def probe(pm):
 
 
 def _sane(vals):
-    """合理性校验：三个字段都落在合法区间"""
     try:
         p, d, r = vals["progress"], vals["duration"], vals["rate"]
         if not (math.isfinite(p) and math.isfinite(d) and math.isfinite(r)):
@@ -278,29 +263,38 @@ class OffsetResolver:
         self._thread = None
         self._stop = False
         self._started = False
+        self._state = "idle"  # idle / probing / ready / failed / stopped
+        # 缓存仍在 server/ 根目录（与旧版本一致），换路径会让老用户重复探测一次
         self._config_path = config_path or os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), CONFIG_NAME)
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            CONFIG_NAME)
 
     def current(self):
-        """当前可用偏移（dict），探测中/失败返回 None"""
         with self._lock:
             return self._offsets
 
+    def offset_state(self):
+        """对外暴露探测状态（/healthz）：idle/probing/ready/failed/stopped"""
+        with self._lock:
+            return self._state
+
     def start(self):
-        """幂等启动后台探测线程"""
         with self._lock:
             if self._started:
                 return
             self._started = True
+            self._state = "idle"
         self._thread = threading.Thread(target=self._run, name="offset-probe", daemon=True)
         self._thread.start()
 
     def stop(self):
         self._stop = True
+        with self._lock:
+            if self._state != "ready":
+                self._state = "stopped"
 
     # ---- 内部 ----
     def _load_store(self):
-        """合并内置已知版本 + 磁盘缓存，返回 {version: offsets}"""
         store = {k: dict(v) for k, v in KNOWN_OFFSETS.items()}
         try:
             with open(self._config_path, "r", encoding="utf-8") as f:
@@ -325,12 +319,15 @@ class OffsetResolver:
         except Exception as e:
             log(f"写缓存失败: {e}")
 
+    def _set_state(self, state):
+        with self._lock:
+            self._state = state
+
     def _set_offsets(self, offsets):
         with self._lock:
             self._offsets = offsets
 
     def _validate(self, pm, base, offsets):
-        """读三个字段并做合理性校验"""
         try:
             vals = {}
             for k, off in offsets.items():
@@ -341,36 +338,38 @@ class OffsetResolver:
 
     def _run(self):
         backoff = 10.0
+        self._set_state("probing")
         while not self._stop:
             pm = None
             try:
                 pm = pymem.Pymem(PROCESS_NAME)
                 base, size = find_module(pm)
                 if base is None:
+                    self._set_state("probing")
                     log("等待网易云运行...")
                     time.sleep(backoff)
                     continue
 
                 ver = read_version(pm, size, base)
+                self._set_state("probing")
                 log(f"检测到版本: {ver}")
 
-                # 1) 缓存/内置偏移
                 off = self._load_store().get(ver)
                 if off and self._validate(pm, base, off):
                     self._set_offsets(dict(off))
+                    self._set_state("ready")
                     log(f"✓ 偏移已就绪 (progress=0x{off['progress']:X} "
                         f"duration=0x{off['duration']:X} rate=0x{off['rate']:X})")
-                    return  # 成功，线程结束
+                    return
 
-                # 2) 自动探测
                 log("偏移失效或未知版本，开始自动探测（请确保正在播放歌曲）...")
                 off = probe(pm)
                 if off:
                     self._set_offsets(off)
+                    self._set_state("ready")
                     self._save(ver, off)
                     log(f"✓ 偏移已就绪 (progress=0x{off['progress']:X} "
                         f"duration=0x{off['duration']:X} rate=0x{off['rate']:X})")
-                    log("服务端已开始正常读取，壁纸前端应能显示歌词")
                     return
 
                 log(f"探测失败（可能未播放），{backoff:.0f}s 后重试")

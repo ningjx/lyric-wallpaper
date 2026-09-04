@@ -20,12 +20,14 @@
     ├─ Apple Music：Windows SMTC ── 歌名 / 歌手 / 精确进度 / 时长
     └─ 网易云官方 API ─ 歌曲搜索 + 歌词（Apple Music 同样复用）
 
-server/  (Python, http://127.0.0.1:9863)
-    ├─ GET /query       播放器 + 歌曲状态
-    └─ GET /api/lyric   当前歌曲歌词
+server/  (Python, aiohttp 异步, http://127.0.0.1:9863)
+    ├─ GET /query       播放器 + 歌曲状态（兼容原服务）
+    ├─ GET /api/lyric   当前歌曲歌词（兼容原服务，source 为命中 provider）
+    ├─ GET /sse         状态/切歌实时推送（可选）
+    └─ GET /healthz, /metrics   健康与指标诊断
 
 壁纸前端  (Wallpaper Engine Web 壁纸)
-    └─ 200ms 轮询 /query 校准进度，切歌时请求 /api/lyric
+    └─ 轮询 /query 校准进度（+ 可选接 /sse），切歌时请求 /api/lyric
 ```
 
 ## 功能特性
@@ -43,7 +45,7 @@ server/  (Python, http://127.0.0.1:9863)
 ```bash
 cd server
 pip install -r requirements.txt
-python nowplaying_server.py
+python -m server
 ```
 
 看到当前播放歌曲即表示已连接：网易云会显示 `✓ 服务就绪`，Apple Music 会显示 `Apple Music`。详见 [`server/README.md`](server/README.md)。
@@ -99,13 +101,17 @@ lyric-wallpaper/
 │       ├── player/          状态机 + 本地时钟
 │       ├── lyrics/          LRC 解析 + 时间轴 + 渲染器
 │       └── styles/          布局与动画
-├── server/              服务端（Python）
+├── server/              服务端（Python，aiohttp 异步包）
 │   ├── README.md
-│   ├── nowplaying_server.py    Now Playing API 服务（端口 9863）
-│   ├── offset_probe.py         播放状态偏移自动探测 + 版本缓存
-│   ├── netease_nowplaying.py   命令行读取当前歌曲
-│   ├── requirements.txt
-│   └── tools/                  21 个开发/验证脚本（研究记录，非运行必需）
+│   ├── __main__.py / server.py   入口与生命周期（`python -m server`）
+│   ├── config.py                 配置（config.json 可选覆盖）
+│   ├── core/                     状态存储/仲裁/负载构造/指标
+│   ├── sources/                  数据源抽象 + 网易云内存 + Apple SMTC
+│   ├── lyrics/                   可插拔歌词体系（搜索/Provider 链/缓存）
+│   ├── web/                      aiohttp 路由（/query /api/lyric /sse /healthz /metrics）
+│   ├── probing/                  偏移自动探测 + 版本缓存
+│   ├── requirements*.txt         依赖拆分（core / apple 可选 / dev）
+│   └── tools/                  21 个历史开发/验证脚本（研究记录，非运行必需）
 └── docs/                方案文档 + API 示例
     ├── wallpaper_engine_now_playing_歌词动态壁纸方案.md
     └── 获取歌词示例.txt

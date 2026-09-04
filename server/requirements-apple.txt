@@ -1,0 +1,2 @@
+# 可选：Apple Music（Windows SMTC）。缺省时服务可正常启动，仅少 Apple 数据源。
+winrt-Windows.Media.Control>=2.0
