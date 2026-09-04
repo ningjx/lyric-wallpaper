@@ -360,10 +360,9 @@ class OffsetResolver:
         while not self._stop:
             pm = None
             try:
-                # 进程/依赖不存在属常态：安静等待，不当作异常
+                # 进程/依赖不存在属常态：完全静默等待，不输出任何「等待」类提示
                 if not process_exists():
                     self._set_state("waiting")
-                    self._log_once("wait", "等待网易云运行（检测到即启用）...")
                     time.sleep(backoff)
                     continue
 
@@ -371,7 +370,6 @@ class OffsetResolver:
                 base, size = find_module(pm)
                 if base is None:
                     self._set_state("waiting")
-                    self._log_once("wait", "未找到 cloudmusic.dll，等待...")
                     time.sleep(backoff)
                     continue
 
