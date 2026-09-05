@@ -41,6 +41,8 @@ def _sse_frame(data: dict) -> bytes:
 def _state_snapshot(store: StateStore) -> dict:
     res = store.resolved
     ctx = store.track_context
+    track = ctx.track_info if ctx else None
+    lyric = ctx.lyric_result if ctx else None
     return {
         "seq": res.seq,
         "source": res.source,
@@ -51,6 +53,13 @@ def _state_snapshot(store: StateStore) -> dict:
         "progress": round(res.progress, 3),
         "duration": round(res.duration, 3),
         "resolveState": ctx.resolve_state if ctx else "idle",
+        # 搜索/歌词解析完成后才有的附加信息。注意：切歌事件（song 事件）
+        # 发出的瞬间这些还没就绪（搜索尚未返回），前端不可依赖其非空；
+        # 等「解析完成」的 state 事件到达时，这些字段才完整可用。
+        "trackId": getattr(track, "id", "") or "",
+        "album": getattr(track, "album", "") or "",
+        "cover": getattr(track, "cover", "") or "",
+        "hasLyric": bool(getattr(lyric, "has_lyric", False)),
     }
 
 
