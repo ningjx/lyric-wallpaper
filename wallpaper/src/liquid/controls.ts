@@ -3,11 +3,11 @@ import { DEFAULT_LIQUID_SETTINGS, type LiquidSettings, type ReferenceLyricsWallp
 type Control = {
   key: keyof LiquidSettings;
   label: string;
-  kind: "range" | "checkbox" | "color" | "select";
+  kind: "range" | "checkbox" | "color";
   min?: number;
   max?: number;
   step?: number;
-  options?: Array<[string, string]>;
+  valueLabels?: Record<string, string>;
 };
 
 const groups: Array<{ title: string; controls: Control[] }> = [
@@ -19,7 +19,7 @@ const groups: Array<{ title: string; controls: Control[] }> = [
     { key: "lyricScrollSpeed", label: "滚动速度", kind: "range", min: 2, max: 20, step: .1 },
     { key: "lyricOffsetX", label: "整体水平", kind: "range", min: -1000, max: 1000, step: 1 },
     { key: "lyricOffsetY", label: "整体垂直", kind: "range", min: -600, max: 600, step: 1 },
-    { key: "lyricAlignment", label: "屏幕对齐", kind: "select", options: [["0", "居中"], ["1", "靠左"], ["2", "靠右"]] },
+    { key: "lyricAlignment", label: "屏幕对齐", kind: "range", min: 0, max: 2, step: 1, valueLabels: { "0": "居中", "1": "靠左", "2": "靠右" } },
   ] },
   { title: "空间层次", controls: [
     { key: "lyricDepthMinScale", label: "远处最小缩放", kind: "range", min: .35, max: .95, step: .01 },
@@ -49,7 +49,7 @@ const groups: Array<{ title: string; controls: Control[] }> = [
   ] },
   { title: "高光", controls: [
     { key: "highlight", label: "启用高光", kind: "checkbox" },
-    { key: "highlightMode", label: "模式", kind: "select", options: [["0", "默认"], ["1", "环境"], ["2", "纯净"]] },
+    { key: "highlightMode", label: "模式", kind: "range", min: 0, max: 2, step: 1, valueLabels: { "0": "默认", "1": "环境", "2": "纯净" } },
     { key: "highlightColor", label: "高光颜色", kind: "color" },
     { key: "highlightAlpha", label: "强度", kind: "range", min: 0, max: 1, step: .01 },
     { key: "highlightAngle", label: "光线角度", kind: "range", min: -3.14, max: 3.14, step: .01 },
@@ -95,13 +95,13 @@ export function mountLiquidControls(root: HTMLElement, wallpaper: ReferenceLyric
   const settings = wallpaper.getSettings();
   const sync = (next: LiquidSettings): void => {
     for (const control of groups.flatMap((group) => group.controls)) {
-      const input = content.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-setting="${control.key}"]`)!;
+      const input = content.querySelector<HTMLInputElement>(`[data-setting="${control.key}"]`)!;
       const value = next[control.key];
       if (control.kind === "checkbox") (input as HTMLInputElement).checked = Boolean(value);
       else if (control.kind === "color") input.value = rgbToHex(value as [number, number, number]);
       else input.value = String(value);
       const output = input.closest<HTMLElement>("label")?.querySelector<HTMLOutputElement>("output");
-      if (output) output.value = format(value);
+      if (output) output.value = format(value, control.valueLabels);
     }
   };
   for (const group of groups) {
@@ -119,13 +119,14 @@ export function mountLiquidControls(root: HTMLElement, wallpaper: ReferenceLyric
   };
   toggle.addEventListener("click", () => setOpen(panel.hidden));
   const updateSetting = (event: Event): void => {
-    const input = event.target as HTMLInputElement | HTMLSelectElement;
+    const input = event.target as HTMLInputElement;
     const key = input.dataset.setting as keyof LiquidSettings | undefined;
     if (!key) return;
     const value = input.type === "checkbox" ? (input as HTMLInputElement).checked : input.type === "color" ? hexToRgb(input.value) : Number(input.value);
     wallpaper.setSettings({ [key]: value } as Partial<LiquidSettings>);
     const output = input.closest<HTMLElement>("label")?.querySelector<HTMLOutputElement>("output");
-    if (output) output.value = format(value);
+    const control = groups.flatMap((group) => group.controls).find((item) => item.key === key);
+    if (output) output.value = format(value, control?.valueLabels);
   };
   content.addEventListener("input", updateSetting);
   content.addEventListener("change", updateSetting);
@@ -144,14 +145,16 @@ function controlElement(control: Control, settings: LiquidSettings): HTMLLabelEl
     label.innerHTML = `<span>${control.label}</span><input data-setting="${control.key}" type="checkbox">`;
   } else if (control.kind === "color") {
     label.innerHTML = `<span>${control.label}</span><input data-setting="${control.key}" type="color">`;
-  } else if (control.kind === "select") {
-    label.innerHTML = `<span>${control.label}</span><select data-setting="${control.key}">${control.options!.map(([value, name]) => `<option value="${value}">${name}</option>`).join("")}</select>`;
   } else {
-    label.innerHTML = `<span>${control.label}</span><input data-setting="${control.key}" type="range" min="${control.min}" max="${control.max}" step="${control.step}"><output>${format(current)}</output>`;
+    label.innerHTML = `<span>${control.label}</span><input data-setting="${control.key}" type="range" min="${control.min}" max="${control.max}" step="${control.step}"><output>${format(current, control.valueLabels)}</output>`;
   }
   return label;
 }
 
 function rgbToHex([r, g, b]: [number, number, number]): string { return `#${[r, g, b].map((v) => Math.round(v * 255).toString(16).padStart(2, "0")).join("")}`; }
 function hexToRgb(value: string): [number, number, number] { return [1, 3, 5].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16) / 255) as [number, number, number]; }
-function format(value: unknown): string { return typeof value === "number" ? (Math.abs(value) < 10 ? value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "") : String(Math.round(value))) : String(value); }
+function format(value: unknown, valueLabels?: Record<string, string>): string {
+  const label = valueLabels?.[String(value)];
+  if (label) return label;
+  return typeof value === "number" ? (Math.abs(value) < 10 ? value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "") : String(Math.round(value))) : String(value);
+}
