@@ -270,6 +270,9 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
 
   private backgroundSource(value: string): string {
     if (!value) return WALLPAPER_SOURCE;
+    // Windows 盘符（C:\\...）不能被当作 URL scheme；Wallpaper Engine 的
+    // file 属性正是以这种本地路径形式返回值。
+    if (/^[a-z]:[\\/]/i.test(value)) return `file:///${value.replace(/\\/g, "/")}`;
     if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return value;
     return `file:///${value.replace(/\\/g, "/")}`;
   }
