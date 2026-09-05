@@ -13,6 +13,7 @@ type Control = {
 const groups: Array<{ title: string; controls: Control[] }> = [
   { title: "歌词排版", controls: [
     { key: "lyricFontScale", label: "字体大小", kind: "range", min: .5, max: 1.6, step: .01 },
+    { key: "lyricGlassPadding", label: "背板内边距", kind: "range", min: 0, max: 160, step: 1 },
     { key: "lyricGap", label: "歌词间距", kind: "range", min: 0, max: 120, step: 1 },
     { key: "lyricVerticalOffset", label: "垂直微调", kind: "range", min: -40, max: 40, step: 1 },
     { key: "lyricScrollSpeed", label: "滚动速度", kind: "range", min: 2, max: 20, step: .1 },

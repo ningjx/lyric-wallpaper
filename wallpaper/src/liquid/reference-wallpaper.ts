@@ -8,7 +8,7 @@ const WALLPAPER_SOURCE = `${import.meta.env.BASE_URL}backgrounds/wallhaven-vpolw
 const RENDERER_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
 export interface LiquidSettings {
-  lyricFontScale: number; lyricGap: number; lyricVerticalOffset: number; lyricScrollSpeed: number;
+  lyricFontScale: number; lyricGlassPadding: number; lyricGap: number; lyricVerticalOffset: number; lyricScrollSpeed: number;
   lyricOffsetX: number; lyricOffsetY: number; lyricAlignment: 0 | 1 | 2;
   lyricDepthMinScale: number; lyricDepthScaleFalloff: number; lyricDepthScaleCurve: number;
   lyricDepthAlphaFalloff: number; lyricDepthAlphaCurve: number; lyricDepthGlassFloor: number; lyricDepthCullDistance: number;
@@ -22,7 +22,7 @@ export interface LiquidSettings {
 }
 
 export const DEFAULT_LIQUID_SETTINGS: LiquidSettings = {
-  lyricFontScale: .77, lyricGap: 120, lyricVerticalOffset: 0, lyricScrollSpeed: 5.5,
+  lyricFontScale: .77, lyricGlassPadding: 20, lyricGap: 120, lyricVerticalOffset: 0, lyricScrollSpeed: 5.5,
   lyricOffsetX: 0, lyricOffsetY: 0, lyricAlignment: 0,
   lyricDepthMinScale: .58, lyricDepthScaleFalloff: .55, lyricDepthScaleCurve: 1.7,
   lyricDepthAlphaFalloff: .65, lyricDepthAlphaCurve: 1.35, lyricDepthGlassFloor: .15, lyricDepthCullDistance: 3.5,
@@ -182,13 +182,17 @@ export class ReferenceLyricsWallpaper {
     const maxWidth = Math.min(this.width * .82, 1480);
     for (let pass = 0; pass < 3; pass++) {
       const metrics = this.measureText(text, fontWeight, fontSize);
-      const padding = Math.max(18, Math.round(fontSize * .26));
+      const padding = this.lyricGlassPadding();
       const available = maxWidth - padding * 2;
       if (metrics.width <= available) return { fontSize, ...metrics, padding };
       fontSize = Math.max(28, fontSize * available / metrics.width);
     }
     const metrics = this.measureText(text, fontWeight, fontSize);
-    return { fontSize, ...metrics, padding: Math.max(18, Math.round(fontSize * .26)) };
+    return { fontSize, ...metrics, padding: this.lyricGlassPadding() };
+  }
+
+  private lyricGlassPadding(): number {
+    return Math.max(0, Math.round(this.settings.lyricGlassPadding));
   }
 
   private measureText(text: string, fontWeight: number, fontSize: number): { width: number; height: number; opticalOffset: number } {
