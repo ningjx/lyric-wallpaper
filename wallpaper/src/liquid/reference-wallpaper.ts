@@ -4,6 +4,8 @@ import type { GlassElementConfig } from "../../vendor/liquid-glass-webgl/src/com
 import type { LyricLine } from "../lyrics/parser";
 
 const FONT_RATIO = .050;
+const LYRIC_SCROLL_SETTLE_DISTANCE = .75;
+const LYRIC_SCROLL_SETTLE_VELOCITY = 3;
 const WALLPAPER_SOURCE = `${import.meta.env.BASE_URL}backgrounds/wallhaven-vpolwm.jpg`;
 const RENDERER_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
@@ -90,8 +92,11 @@ export class ReferenceLyricsWallpaper {
       this.hasPositioned = true;
     } else {
       const next = springStepCritical(this.scrollY, this.velocity, target, delta, this.settings.lyricScrollSpeed);
-      this.scrollY = Math.abs(next.current - target) < .1 && Math.abs(next.velocity) < .1 ? target : next.current;
-      this.velocity = next.velocity;
+      const shouldSettle =
+        Math.abs(next.current - target) < LYRIC_SCROLL_SETTLE_DISTANCE &&
+        Math.abs(next.velocity) < LYRIC_SCROLL_SETTLE_VELOCITY;
+      this.scrollY = shouldSettle ? target : next.current;
+      this.velocity = shouldSettle ? 0 : next.velocity;
     }
     this.renderer.setScrollY(this.scrollY);
     if (nextActive !== this.active || Math.abs(this.scrollY - this.lastLayoutScrollY) > .05) {
