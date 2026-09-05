@@ -4,10 +4,12 @@
  * ============================================================ */
 
 :root {
-  /* 基线行距、译文额外高度、水平/垂直偏移、字体 —— 运行时由 wallpaper.ts 的
-     属性回调覆盖为属性面板的调节值；默认值与 renderer.ts / body 保持一致 */
+  /* 这些值仅是 JS 执行前首帧的兜底，须与 src/defaults.ts 保持一致；
+     运行时由 wallpaper.ts 的属性回调覆盖。--rows（歌词窗口行数）
+     由 renderer 的 WINDOW 写入，此处 7 仅为同款兜底 */
   --gap: 130px;
   --trans-extra: 43px;
+  --rows: 7;
   --offset-x: 0px;
   --offset-y: 0px;
   --font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
@@ -66,9 +68,9 @@ body {
   transform: translate(calc(-50% + var(--offset-x)), calc(-50% + var(--offset-y)));
   /* 宽度自适应：常规屏按视口比例，超宽屏（21:9）放宽到上限 */
   width: min(90vw, 2200px);
-  /* 7 行 + 译文补偿的额外高度（译文最多上下各 3 行带译文），
-     避免带译文的上下行被 overflow 提前裁剪 */
-  height: calc(var(--gap) * 7 + var(--trans-extra) * 7);
+  /* 窗口行数 × 行距 + 译文补偿的额外高度（译文最多上下各 3 行带译文），
+     避免带译文的上下行被 overflow 提前裁剪；行数来自 renderer 的 WINDOW */
+  height: calc(var(--gap) * var(--rows, 7) + var(--trans-extra) * var(--rows, 7));
   overflow: hidden;
 }
 

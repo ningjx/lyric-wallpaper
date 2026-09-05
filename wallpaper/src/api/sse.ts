@@ -10,6 +10,12 @@ import type { PlayerSnapshot, SseEvent } from "./types";
  * - 心跳（ping）事件无 state，直接忽略。
  */
 export class SseClient {
+  /**
+   * fetch 回退路径的读停顿阈值（毫秒）：连续无数据超过该值视为连接已死，
+   * 主动断开交给退避重连。服务端每 25s 推一个 ping，60s ≈ 2.4 个心跳。
+   */
+  private static readonly READ_STALL_MS = 60000;
+
   /** 收到一条状态快照 */
   public onState: ((state: PlayerSnapshot) => void) | null = null;
   /** 连接状态变化（true=在线） */
@@ -92,10 +98,27 @@ export class SseClient {
   async #fetchLoop(): Promise<void> {
     if (this.closed) return;
     this.ac = new AbortController();
+    // 锁定本循环自己的 AbortController：停顿定时器只 abort 它，
+    // 避免重连后误杀新连接
+    const ac = this.ac;
+    // 读停顿保护：连续 READ_STALL_MS 无数据（含心跳）视为连接已死，
+    // 主动断开触发退避重连；EventSource 路径由浏览器自身心跳负责
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearStall = (): void => {
+      if (stallTimer !== null) {
+        clearTimeout(stallTimer);
+        stallTimer = null;
+      }
+    };
+    const resetStall = (): void => {
+      clearStall();
+      stallTimer = setTimeout(() => ac.abort(), SseClient.READ_STALL_MS);
+    };
     try {
+      resetStall();
       const resp = await fetch(this.url, {
         cache: "no-store",
-        signal: this.ac.signal,
+        signal: ac.signal,
       });
       if (!resp.ok || !resp.body) throw new Error(`SSE HTTP ${resp.status}`);
       this.#onOpen();
@@ -106,6 +129,7 @@ export class SseClient {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        resetStall(); // 收到数据（ping 或状态帧）即重置停顿计时
         buf += decoder.decode(value, { stream: true });
         // 按空行分帧，逐帧解析 data: 行
         let idx;
@@ -115,9 +139,11 @@ export class SseClient {
           this.#parseFrame(frame);
         }
       }
+      clearStall();
       // 正常结束（服务端主动断开）：若未关闭则重连
       if (!this.closed) this.#onError();
     } catch {
+      clearStall();
       if (!this.closed) this.#onError();
     }
   }
@@ -138,6 +164,9 @@ export class SseClient {
     } catch {
       return;
     }
+    // 按帧类型路由：ping 心跳显式忽略；其余类型带 state 才回传。
+    // 未知类型（后端协议演进时）只要带 state 仍按快照处理，避免静默丢弃。
+    if (evt.type === "ping") return;
     if (evt.state) this.onState?.(evt.state);
   }
 }

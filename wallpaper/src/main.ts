@@ -2,7 +2,7 @@ import "./styles/main.css";
 import { NowPlayingApi } from "./api/nowPlaying";
 import { SyncClock } from "./player/SyncClock";
 import { MusicState } from "./player/MusicState";
-import { LyricsRenderer, transExtraFor } from "./lyrics/renderer";
+import { LyricsRenderer, transExtraFor, WINDOW } from "./lyrics/renderer";
 import { SceneController } from "./scene";
 import { setupWallpaperEnvironment, DEFAULT_SETTINGS } from "./wallpaper";
 import type { WallpaperSettings } from "./wallpaper";
@@ -30,11 +30,14 @@ function main(): void {
   };
 
   setupWallpaperEnvironment(applySettings);
+  // 歌词窗口行数 → CSS 变量（唯一来源是 renderer 的 WINDOW，CSS 不硬编码）
+  document.documentElement.style.setProperty("--rows", String(WINDOW));
   // 初始以默认值刷一次，保证 CSS 变量就位（Wallpaper Engine 首次未必回传属性）
   applySettings(DEFAULT_SETTINGS);
 
   // 数据流：低频轮询 + 校准本地时钟；有歌淡入、无歌淡出场景层
-  new MusicState(api, clock, renderer, new SceneController(sceneEl)).start();
+  const musicState = new MusicState(api, clock, renderer, new SceneController(sceneEl));
+  musicState.start();
 
   // 渲染流：高频 rAF，本地时钟驱动，动画不依赖 API 轮询
   const loop = (): void => {
@@ -44,7 +47,19 @@ function main(): void {
   requestAnimationFrame(loop);
 
   // 输入微调「当前歌」歌词对齐（滚轮为主、拖拽兜底），显示累积偏移并淡出
-  setupOffsetAdjust(renderer);
+  const cleanupInput = setupOffsetAdjust(renderer);
+
+  // 生命周期：卸载前显式清理 SSE / 定时器 / 输入监听，
+  // 避免 WE 反复重载壁纸时残留重连定时器与全局监听
+  let unloaded = false;
+  const cleanupAll = (): void => {
+    if (unloaded) return;
+    unloaded = true;
+    musicState.stop();
+    cleanupInput();
+  };
+  window.addEventListener("beforeunload", cleanupAll);
+  window.addEventListener("pagehide", cleanupAll);
 }
 
 /** 排查用：左下角实时标注 WE 到底投递了哪些事件（默认开，确认后改成 false） */
@@ -59,9 +74,11 @@ const DEBUG_INPUT = true;
  * - wheel：能收到就用（按“格”累积，规避高分辨率滚轮一顿吐几十个微小 deltaY 乱跳）
  * - 拖拽：mousedown 起拖 → mousemove 按纵向位移换算偏移 → mouseup 结束，作可靠兜底
  */
-function setupOffsetAdjust(renderer: LyricsRenderer): void {
+function setupOffsetAdjust(renderer: LyricsRenderer): () => void {
   const STEP_MS = 200;       // 滚轮每格步进
   const DRAG_MS_PER_PX = 10; // 拖拽：纵向 1px ≈ 10ms
+  // 所有输入监听挂同一个 AbortController，清理时 abort() 一次全部移除
+  const ac = new AbortController();
 
   const hintEl = document.getElementById("offset-hint");
   let hintTimer: ReturnType<typeof setTimeout> | null = null;
@@ -100,7 +117,7 @@ function setupOffsetAdjust(renderer: LyricsRenderer): void {
     if (steps === 0) return;
     renderer.nudgeTempOffset(steps * STEP_MS);
     showHint(renderer.tempOffsetMs);
-  });
+  }, { signal: ac.signal });
 
   // —— 拖拽（可靠兜底）——
   let dragging = false;
@@ -124,24 +141,29 @@ function setupOffsetAdjust(renderer: LyricsRenderer): void {
     dragging = true;
     startY = e.clientY;
     startOffset = renderer.tempOffsetMs;
-  });
+  }, { signal: ac.signal });
   window.addEventListener("mousemove", (e: MouseEvent) => {
     if (!dragging) return;
     const ms = startOffset + (e.clientY - startY) * DRAG_MS_PER_PX;
     renderer.setTempOffset(ms);
     showHint(renderer.tempOffsetMs);
-  });
+  }, { signal: ac.signal });
   const endDrag = (): void => {
     dragging = false;
   };
-  window.addEventListener("mouseup", endDrag);
-  window.addEventListener("blur", endDrag);
+  window.addEventListener("mouseup", endDrag, { signal: ac.signal });
+  window.addEventListener("blur", endDrag, { signal: ac.signal });
 
-  setupInputDebug();
+  setupInputDebug(ac.signal);
+
+  return (): void => {
+    ac.abort(); // 一次移除全部输入监听
+    if (hintTimer !== null) clearTimeout(hintTimer);
+  };
 }
 
 /** 左下角输入自检：实时标注每种事件是否收到 + 最后一条详情 */
-function setupInputDebug(): void {
+function setupInputDebug(signal?: AbortSignal): void {
   if (!DEBUG_INPUT) return;
   const el = document.createElement("div");
   el.id = "input-debug";
@@ -178,7 +200,7 @@ function setupInputDebug(): void {
     window.addEventListener(t, (e: Event) => {
       fired.add(t);
       render(detail[t](e));
-    });
+    }, { signal });
   }
   render();
 }

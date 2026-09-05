@@ -9,6 +9,7 @@
  * 本项目把"歌词字号 / 行距 / 同步偏移 / 水平偏移 / 垂直偏移 / 亮度 / 字体"
  * 接到这里，回调给渲染器与 CSS 变量。
  */
+import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_GAP } from "./defaults";
 
 /** 可调节的歌词布局参数 */
 export interface WallpaperSettings {
@@ -28,10 +29,6 @@ export interface WallpaperSettings {
   fontFamily: string;
 }
 
-/** 默认字体栈，与 main.css :root 的 --font-family 一致 */
-const DEFAULT_FONT_FAMILY =
-  '"Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif';
-
 /** 字体选项：combo 的 value → CSS font-family 值 */
 const FONTS: Record<string, string> = {
   default: DEFAULT_FONT_FAMILY,
@@ -43,8 +40,8 @@ const FONTS: Record<string, string> = {
 
 /** 默认值，与 renderer.ts / main.css 的默认保持一致 */
 export const DEFAULT_SETTINGS: WallpaperSettings = {
-  fontSize: 72,
-  lineGap: 130,
+  fontSize: DEFAULT_FONT_SIZE,
+  lineGap: DEFAULT_GAP,
   offsetY: 0,
   offsetX: 0,
   syncOffset: 0,

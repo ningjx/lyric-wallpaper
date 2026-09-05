@@ -1,15 +1,12 @@
 import type { LyricLine } from "./parser";
 import { findCurrentLine } from "./timeline";
 import type { LyricsTarget } from "../player/MusicState";
+import { DEFAULT_FONT_SIZE, DEFAULT_GAP } from "../defaults";
 
 /** 当前行上下各渲染几行 */
 const HALF = 3;
-/** 窗口行数 */
-const WINDOW = HALF * 2 + 1;
-/** 默认当前行（最大）字号（px），可在 Wallpaper Engine 属性面板调节 */
-const DEFAULT_FONT_SIZE = 72;
-/** 默认行距（px），可在 Wallpaper Engine 属性面板调节 */
-const DEFAULT_GAP = 130;
+/** 窗口行数（导出给 main.ts 写 CSS 变量 --rows，布局高度以它为准，CSS 不硬编码） */
+export const WINDOW = HALF * 2 + 1;
 /** 各层级字号相对当前行（tier 0）的比例，调节字号时整体按此缩放 */
 const FONT_RATIOS = [1, 52 / 72, 38 / 72, 30 / 72];
 /** 各层级透明度 */
