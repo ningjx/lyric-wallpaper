@@ -223,17 +223,9 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   }
 
   private fitTypography(text: string, fontWeight: number, scale: number): { fontSize: number; width: number; height: number; padding: number; opticalOffset: number } {
-    let fontSize = Math.max(18, this.width * FONT_RATIO * scale * this.settings.lyricFontScale);
-    // 大屏上的歌词需要更大的可用宽度；否则较长的某一句会被限宽反算，
-    // 看起来像该行完全不响应字号调节。
-    const maxWidth = Math.min(this.width * .9, 1800);
-    for (let pass = 0; pass < 3; pass++) {
-      const metrics = this.measureText(text, fontWeight, fontSize);
-      const padding = this.lyricGlassPadding();
-      const available = maxWidth - padding * 2;
-      if (metrics.width <= available) return { fontSize, ...metrics, padding };
-      fontSize = Math.max(18, fontSize * available / metrics.width);
-    }
+    // 字号完全由“字体大小”和空间深度决定。长歌词保留同样的字号，
+    // 让背板自然变宽，绝不再根据字符串长度反算缩小。
+    const fontSize = Math.max(18, this.width * FONT_RATIO * scale * this.settings.lyricFontScale);
     const metrics = this.measureText(text, fontWeight, fontSize);
     return { fontSize, ...metrics, padding: this.lyricGlassPadding() };
   }
