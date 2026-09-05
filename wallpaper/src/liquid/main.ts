@@ -34,15 +34,65 @@ let frame: number | null = null;
 let wallpaper: ReferenceLyricsWallpaper | null = null;
 let musicState: MusicState | null = null;
 let clock: SyncClock | null = null;
+let activeBackgroundImage = "";
+let backgroundTimer: number | null = null;
+let backgroundSlideshowKey: string | null = null;
+let backgroundRequestGeneration = 0;
 // Wallpaper Engine 会在页面刚载入时推送一次属性值。监听器必须先于字体、
 // WebGL 等异步初始化注册，否则首次的“显示壁纸调参”事件会丢失。
 let wallpaperSettings: WallpaperSettings = { ...DEFAULT_SETTINGS, liquid: { ...DEFAULT_SETTINGS.liquid } };
 
 setupWallpaperEnvironment((settings) => {
-  wallpaperSettings = settings;
-  wallpaper?.setSettings(settings.liquid);
+  // 随机图片不属于持久化属性；后续普通参数更新时保留当前正在显示的一张。
+  wallpaperSettings = {
+    ...settings,
+    liquid: { ...settings.liquid, backgroundImage: activeBackgroundImage },
+  };
+  wallpaper?.setSettings(wallpaperSettings.liquid);
   musicState?.setPollInterval(settings.pollIntervalMs);
+  syncBackgroundSlideshow();
 });
+
+function syncBackgroundSlideshow(): void {
+  const directory = wallpaperSettings.liquid.backgroundDirectory;
+  const intervalMs = Math.max(10, wallpaperSettings.liquid.backgroundIntervalSeconds) * 1000;
+  const key = `${directory}\u0000${intervalMs}`;
+  if (key === backgroundSlideshowKey) return;
+  backgroundSlideshowKey = key;
+  backgroundRequestGeneration++;
+  if (backgroundTimer !== null) {
+    clearInterval(backgroundTimer);
+    backgroundTimer = null;
+  }
+  if (!directory) {
+    if (activeBackgroundImage) {
+      activeBackgroundImage = "";
+      wallpaperSettings = { ...wallpaperSettings, liquid: { ...wallpaperSettings.liquid, backgroundImage: "" } };
+      wallpaper?.setSettings(wallpaperSettings.liquid);
+    }
+    return;
+  }
+  activeBackgroundImage = "";
+  wallpaper?.setSettings({ backgroundImage: "" });
+  requestRandomBackground(backgroundRequestGeneration);
+  backgroundTimer = window.setInterval(() => requestRandomBackground(backgroundRequestGeneration), intervalMs);
+}
+
+function requestRandomBackground(generation: number): void {
+  const request = (window as Window & {
+    wallpaperRequestRandomFileForProperty?: (property: string, callback: (property: string, filePath: string) => void) => void;
+  }).wallpaperRequestRandomFileForProperty;
+  if (!request) return;
+  request("backgrounddirectory", (_property, filePath) => {
+    if (generation !== backgroundRequestGeneration || typeof filePath !== "string" || !filePath) return;
+    activeBackgroundImage = filePath;
+    wallpaperSettings = {
+      ...wallpaperSettings,
+      liquid: { ...wallpaperSettings.liquid, backgroundImage: filePath },
+    };
+    wallpaper?.setSettings({ backgroundImage: filePath });
+  });
+}
 
 function showFallback(): void {
   document.documentElement.classList.add("fallback");
@@ -63,6 +113,7 @@ async function boot(): Promise<void> {
     wallpaper = new ReferenceLyricsWallpaper(canvas, previewMode ? lines : []);
     await wallpaper.start();
     wallpaper.setSettings(wallpaperSettings.liquid);
+    syncBackgroundSlideshow();
     if (previewMode) {
       new SceneController(scene).show();
     } else {
@@ -98,4 +149,10 @@ function findCurrentLineForWallpaper(time: number): number {
 
 void boot();
 window.addEventListener("resize", () => wallpaper?.resize());
-window.addEventListener("pagehide", () => { if (frame !== null) cancelAnimationFrame(frame); musicState?.stop(); wallpaper?.dispose(); }, { once: true });
+window.addEventListener("pagehide", () => {
+  if (frame !== null) cancelAnimationFrame(frame);
+  if (backgroundTimer !== null) clearInterval(backgroundTimer);
+  backgroundRequestGeneration++;
+  musicState?.stop();
+  wallpaper?.dispose();
+}, { once: true });
