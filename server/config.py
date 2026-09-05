@@ -62,9 +62,9 @@ class CacheConfig:
 class LyricConfig:
     """歌词解析链。"""
     provider_order: list[str] = field(
-        default_factory=lambda: ["local-file", "netease"])
+        default_factory=lambda: ["local-file", "netease", "qq"])
     total_timeout: float = 8.0       # 整条链上限
-    parallel: bool = False
+    parallel: bool = True            # 多源并行 + 智能选优
 
 
 @dataclass

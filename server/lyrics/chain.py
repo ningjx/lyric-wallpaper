@@ -5,6 +5,9 @@
   - 失败 Provider 进入冷却窗口，冷却期内直接跳过；
   - 整条链有总超时上限 total_timeout；
   - 结果短窗负缓存，避免同一首歌反复触发失败的 Provider。
+
+智能选优（parallel=True）：并行跑全部可用源，按「相似度优先、齐全度次之」
+挑最佳结果，等价于 Widdit 的 selectBestLyric + selectByScore。
 """
 from __future__ import annotations
 
@@ -22,6 +25,12 @@ class _Entry:
     def __init__(self, value: Any, expire: float) -> None:
         self.value = value
         self.expire = expire
+
+
+def _completeness(res: LyricsResult) -> int:
+    """结果齐全度（原词/翻译/逐字各计 1 分，用于相似度相同时的次级排序）。"""
+    return (1 if res.lrc else 0) + (1 if res.translated_lyric else 0) \
+        + (1 if res.karaoke_lyric else 0)
 
 
 class LyricsChain:
@@ -68,12 +77,17 @@ class LyricsChain:
             results = await asyncio.gather(
                 *(self._safe_fetch(p, ids) for p in eligible),
                 return_exceptions=True)
-            for res in results:
-                if isinstance(res, LyricsResult) and res.has_lyric:
-                    return res
-            return None
+            valid = [r for r in results
+                     if isinstance(r, LyricsResult) and r.has_lyric]
+            if not valid:
+                return None
+            # 智能选优：相似度优先，其次看「原词/翻译/逐字」齐全度。
+            # local-file 相似度记为 100，天然排最前。
+            valid.sort(key=lambda r: (r.similarity, _completeness(r)),
+                       reverse=True)
+            return valid[0]
 
-        # 顺序兜底：默认按登记顺序取首个命中
+        # 顺序兜底：按登记顺序取首个命中
         for p in eligible:
             res = await self._safe_fetch(p, ids)
             if res is not None and res.has_lyric:

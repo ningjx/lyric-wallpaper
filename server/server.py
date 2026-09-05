@@ -28,9 +28,11 @@ from .core.stats import Metrics
 from .lyrics.cache import LyricsCache
 from .lyrics.chain import LyricsChain
 from .lyrics.http import NeteaseHttp
-from .lyrics.providers import FileLyricsProvider, NeteaseLyricsProvider
+from .lyrics.providers import (
+    FileLyricsProvider, NeteaseLyricsProvider, QQMusicLyricsProvider,
+)
 from .lyrics.resolver import ResolverTask
-from .lyrics.search import NeteaseSearcher
+from .lyrics.search import NeteaseSearcher, QQMusicSearcher
 from .sources.registry import build_sources, start_all, stop_all
 from .web.app import create_app, _state_snapshot
 from .web.sse import EventHub
@@ -38,6 +40,7 @@ from .web.sse import EventHub
 PROVIDER_BUILDERS = {
     "local-file": lambda cfg, http, fs: FileLyricsProvider(fs),
     "netease": lambda cfg, http, fs: NeteaseLyricsProvider(http),
+    "qq": lambda cfg, http, fs: QQMusicLyricsProvider(http),
 }
 
 
@@ -108,10 +111,13 @@ async def serve(cfg: ServerConfig) -> None:
     chain = build_lyrics_chain(cfg, http)
     cache = LyricsCache(cfg.cache.data_dir,
                         mem_cap=cfg.cache.lyrics_mem_cap)
-    searcher = NeteaseSearcher(
-        http, hit_ttl=cfg.netease.search_cache_ttl,
-        negative_ttl=cfg.netease.search_negative_ttl)
-    resolver = ResolverTask(store, [searcher], chain, cache, metrics)
+    searchers = [
+        NeteaseSearcher(http, hit_ttl=cfg.netease.search_cache_ttl,
+                        negative_ttl=cfg.netease.search_negative_ttl),
+        QQMusicSearcher(http, hit_ttl=cfg.netease.search_cache_ttl,
+                        negative_ttl=cfg.netease.search_negative_ttl),
+    ]
+    resolver = ResolverTask(store, searchers, chain, cache, metrics)
 
     # ---- SSE 与事件接线 ----
     hub = EventHub()

@@ -59,7 +59,43 @@ class NeteaseHttp:
         key：单飞去重键（搜索按 query、歌词按 song_id），同一时刻同 key
         只发一次网络请求，其余调用方共享同一份结果。
         """
-        key = key or url
+        async def _do():
+            async with self._session.get(
+                    url, params=params, headers=headers) as resp:
+                if resp.status != 200:
+                    raise aiohttp.ClientConnectionError(f"HTTP {resp.status}")
+                return await resp.json(content_type=None)
+
+        return await self._request(key or url, _do)
+
+    async def post_form(self, url: str, *, data: Optional[dict] = None,
+                        headers: Optional[dict] = None,
+                        key: Optional[str] = None) -> Any:
+        """POST x-www-form-urlencoded 并解析 JSON（网易 eapi 用）。"""
+        async def _do():
+            async with self._session.post(
+                    url, data=data, headers=headers) as resp:
+                if resp.status != 200:
+                    raise aiohttp.ClientConnectionError(f"HTTP {resp.status}")
+                return await resp.json(content_type=None)
+
+        return await self._request(key or url, _do)
+
+    async def get_text(self, url: str, *, params: Optional[dict] = None,
+                       headers: Optional[dict] = None,
+                       key: Optional[str] = None) -> Optional[str]:
+        """GET 返回原始文本（QQ 音乐接口可能带 JSONP 包裹，业务层自行剥离）。"""
+        async def _do():
+            async with self._session.get(
+                    url, params=params, headers=headers) as resp:
+                if resp.status != 200:
+                    raise aiohttp.ClientConnectionError(f"HTTP {resp.status}")
+                return await resp.text()
+
+        return await self._request(key or url, _do)
+
+    async def _request(self, key: str, coro_fn) -> Any:
+        """单飞 + 重试 + 熔断的统一封装。"""
         if self.is_fused():
             raise HttpFuseError("netease API circuit open")
 
@@ -68,7 +104,7 @@ class NeteaseHttp:
         if fut is None:
             fut = loop.create_future()
             self._inflight[key] = fut
-            asyncio.create_task(self._fetch(key, url, params, headers, fut))
+            asyncio.create_task(self._fetch_coro(key, coro_fn, fut))
         try:
             # shield：wait_for 超时只放弃等待，不取消在途请求
             return await asyncio.wait_for(
@@ -76,17 +112,11 @@ class NeteaseHttp:
         except asyncio.TimeoutError:
             return None
 
-    async def _fetch(self, key: str, url: str, params: Optional[dict],
-                     headers: Optional[dict], fut: "asyncio.Future") -> None:
+    async def _fetch_coro(self, key: str, coro_fn, fut: "asyncio.Future") -> None:
         try:
             for attempt in range(self._retries + 1):
                 try:
-                    async with self._session.get(
-                            url, params=params, headers=headers) as resp:
-                        if resp.status != 200:
-                            raise aiohttp.ClientConnectionError(
-                                f"HTTP {resp.status}")
-                        data = await resp.json(content_type=None)
+                    data = await coro_fn()
                     self._fuse_failures = 0  # 成功清零
                     if not fut.done():
                         fut.set_result(data)

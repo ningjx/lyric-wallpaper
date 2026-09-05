@@ -50,23 +50,37 @@ class ResolverTask:
         state = "degraded"
 
         try:
-            # 1) 搜索/身份补全（有缓存；仅切歌时执行）
+            # 1) 搜索/身份补全（多源：每个源各自解析 ID，选相似度最高的做展示）
+            best_sim = -1
             for searcher in self.searchers:
                 info = await searcher.search(ids)
                 if not info:
                     continue
-                ids.netease_id = info.get("id")
-                ids.album = info.get("album") or ""
-                track_info = TrackInfo(
-                    id=str(info["id"] or ""),
+                vid = str(info.get("id") or "")
+                if searcher.vendor == "netease":
+                    ids.netease_id = vid
+                elif searcher.vendor == "qq":
+                    ids.qq_id = vid
+                # 供各歌词 Provider 回填 title/author/duration/similarity
+                ids.extra[searcher.vendor] = {
+                    "title": info.get("title") or song,
+                    "author": info.get("author") or author,
+                    "duration": info.get("duration") or 0.0,
+                    "similarity": info.get("similarity", 0),
+                }
+                sim = info.get("similarity", 0)
+                cand = TrackInfo(
+                    id=vid,
                     title=info.get("title") or song,
                     author=info.get("author") or author,
                     album=info.get("album") or "",
                     cover=info.get("cover") or "",
                     source=searcher.vendor)
-                break
+                if sim > best_sim:
+                    best_sim = sim
+                    track_info = cand
             if track_info is None:
-                # 搜索失败（离线/曲库无）：本地伪 ID，保切歌检测可用
+                # 所有源搜索失败（离线/曲库无）：本地伪 ID，保切歌检测可用
                 track_info = TrackInfo(
                     id=pseudo_track_id(song, author),
                     title=song, author=author, source="local")

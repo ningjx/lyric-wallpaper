@@ -15,7 +15,8 @@ class TrackIdentifiers:
     artist: str
     album: str = ""
     duration: float = 0.0
-    netease_id: str | None = None       # 未来顺延: qq_id / kugou_id / isrc …
+    netease_id: str | None = None
+    qq_id: str | None = None
     extra: dict = field(default_factory=dict)
 
 
