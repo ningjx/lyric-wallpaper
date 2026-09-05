@@ -35,6 +35,8 @@ export class MusicState {
   private seq = 0;
   private readonly sse: SseClient;
   private calibrateTimer: number | null = null;
+  private calibrating = false;
+  private pollIntervalMs = 200;
 
   constructor(
     private readonly api: NowPlayingApi,
@@ -53,10 +55,7 @@ export class MusicState {
     this.sse.start();
     void this.calibrate();
 
-    this.calibrateTimer = window.setInterval(
-      () => void this.calibrate(),
-      API_CONFIG.calibrateIntervalMs,
-    );
+    this.restartCalibrateTimer();
   }
 
   /** 停止（页面卸载时调用，避免 SSE 连接与定时器泄漏） */
@@ -66,6 +65,19 @@ export class MusicState {
       this.calibrateTimer = null;
     }
     this.sse.stop();
+  }
+
+  /** 更新 /query 校准频率；Wallpaper Engine 用户属性会持久化此设置。 */
+  setPollInterval(ms: number): void {
+    const next = Math.max(100, Math.min(10_000, Math.round(ms)));
+    if (next === this.pollIntervalMs) return;
+    this.pollIntervalMs = next;
+    if (this.calibrateTimer !== null) this.restartCalibrateTimer();
+  }
+
+  private restartCalibrateTimer(): void {
+    if (this.calibrateTimer !== null) window.clearInterval(this.calibrateTimer);
+    this.calibrateTimer = window.setInterval(() => void this.calibrate(), this.pollIntervalMs);
   }
 
   /**
@@ -103,11 +115,16 @@ export class MusicState {
 
   /** 低频校准：SSE 在线时仅做进度锚点校正；离线时兼做兜底状态感知。 */
   private async calibrate(): Promise<void> {
+    // 高频轮询时不叠加未完成请求，避免慢服务导致请求堆积。
+    if (this.calibrating) return;
+    this.calibrating = true;
     try {
       const state = await this.api.fetchState();
       this.applySnapshot(toSnapshot(state));
     } catch {
       this.setOnline(false);
+    } finally {
+      this.calibrating = false;
     }
   }
 

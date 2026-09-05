@@ -25,17 +25,17 @@ export interface LiquidSettings {
 }
 
 export const DEFAULT_LIQUID_SETTINGS: LiquidSettings = {
-  lyricFontScale: .77, lyricGlassPadding: 20, lyricGap: 120, lyricVerticalOffset: 0, lyricScrollSpeed: 5.5,
-  lyricOffsetX: 0, lyricOffsetY: 0, lyricAlignment: 0,
-  lyricDepthMinScale: .58, lyricDepthScaleFalloff: .55, lyricDepthScaleCurve: 1.7,
-  lyricDepthAlphaFalloff: .65, lyricDepthAlphaCurve: 1.35, lyricDepthGlassFloor: .15, lyricDepthCullDistance: 1.5,
-  cornerRadius: 29, refractionHeight: 22, refractionAmount: -34, blurRadius: 2,
-  saturation: 1.42, brightness: 0, contrast: 1, depthEffect: true, chromaticAberration: false,
-  tintColor: [.18, .52, .72], tintAlpha: .03, surfaceColor: [.80, .94, 1], surfaceAlpha: .04,
-  highlight: true, highlightMode: 0, highlightColor: [.72, .92, 1], highlightAlpha: .34, highlightAngle: -1.05, highlightFalloff: 2.1, highlightWidth: 1,
+  lyricFontScale: .68, lyricGlassPadding: 20, lyricGap: 83, lyricVerticalOffset: 0, lyricScrollSpeed: 5.5,
+  lyricOffsetX: 0, lyricOffsetY: -115, lyricAlignment: 0,
+  lyricDepthMinScale: .61, lyricDepthScaleFalloff: .55, lyricDepthScaleCurve: 1.63,
+  lyricDepthAlphaFalloff: .65, lyricDepthAlphaCurve: 1.12, lyricDepthGlassFloor: .15, lyricDepthCullDistance: 1.5,
+  cornerRadius: 45, refractionHeight: 4, refractionAmount: -34, blurRadius: 0,
+  saturation: 1.35, brightness: 0, contrast: 1, depthEffect: true, chromaticAberration: false,
+  tintColor: [.18, .52, .72], tintAlpha: 0, surfaceColor: [.80, .94, 1], surfaceAlpha: 0,
+  highlight: true, highlightMode: 0, highlightColor: [.72, .92, 1], highlightAlpha: .34, highlightAngle: -1.98, highlightFalloff: 2.1, highlightWidth: 1,
   shadow: true, shadowColor: [.01, .06, .12], shadowAlpha: .18, shadowRadius: 28, shadowOffsetX: 0, shadowOffsetY: 16,
-  separableBlur: false, continuousCorners: true, directBackdrop: true,
-  dpr: .75, blurTapCap: 9, blurDownsample: 2, kawaseBlur: true, blurCache: true, perElementFbo: true,
+  separableBlur: false, continuousCorners: false, directBackdrop: true,
+  dpr: 1, blurTapCap: 9, blurDownsample: 2, kawaseBlur: true, blurCache: true, perElementFbo: true,
 };
 
 export class ReferenceLyricsWallpaper implements LyricsTarget {

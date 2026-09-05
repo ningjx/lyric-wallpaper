@@ -1,18 +1,30 @@
 {
   "description": "动态歌词壁纸：读取本机 Now Playing Service 的播放进度与同步歌词，当前句居中滚动显示",
   "file": "index.html",
-  "general": {
-    "properties": {
-      "showcontrols": {
-        "order": 1,
-        "text": "显示壁纸调参",
-        "type": "bool",
-        "value": false
-      }
-    },
-    "supportsaudioprocessing": false
-  },
-  "title": "Music Lyrics Wallpaper",
-  "type": "web",
-  "visibility": "public"
+  "general": { "properties": {
+    "lyricleadms": { "order": 1, "text": "歌词延迟（正值提前，ms）", "type": "slider", "min": -1000, "max": 1000, "value": 100, "editable": true },
+    "pollintervalms": { "order": 2, "text": "轮询 API 频率（ms）", "type": "slider", "min": 100, "max": 5000, "value": 200, "editable": true },
+
+    "layoutopen": { "order": 10, "text": "展开 · 歌词排版", "type": "bool", "value": false },
+    "lyricfontscale": { "order": 11, "text": "字体大小", "type": "slider", "min": 0.5, "max": 1.6, "value": 0.68, "condition": "layoutopen.value == true" }, "lyricglasspadding": { "order": 12, "text": "背板内边距", "type": "slider", "min": 0, "max": 160, "value": 20, "condition": "layoutopen.value == true" }, "lyricgap": { "order": 13, "text": "歌词间距", "type": "slider", "min": 0, "max": 240, "value": 83, "condition": "layoutopen.value == true" }, "lyricverticaloffset": { "order": 14, "text": "垂直微调", "type": "slider", "min": -40, "max": 40, "value": 0, "condition": "layoutopen.value == true" }, "lyricscrollspeed": { "order": 15, "text": "滚动速度", "type": "slider", "min": 2, "max": 20, "value": 5.5, "condition": "layoutopen.value == true" }, "lyricoffsetx": { "order": 16, "text": "整体水平", "type": "slider", "min": -1000, "max": 1000, "value": 0, "condition": "layoutopen.value == true" }, "lyricoffsety": { "order": 17, "text": "整体垂直", "type": "slider", "min": -600, "max": 600, "value": -115, "condition": "layoutopen.value == true" }, "lyricalignment": { "order": 18, "text": "屏幕对齐", "type": "combo", "value": 0, "condition": "layoutopen.value == true", "options": [{ "label": "居中", "value": 0 }, { "label": "靠左", "value": 1 }, { "label": "靠右", "value": 2 }] },
+
+    "opticsopen": { "order": 20, "text": "展开 · 光学设置", "type": "bool", "value": false },
+    "refractionheight": { "order": 21, "text": "折射高度", "type": "slider", "min": 0, "max": 56, "value": 4, "condition": "opticsopen.value == true" }, "refractionamount": { "order": 22, "text": "折射强度", "type": "slider", "min": -80, "max": 20, "value": -34, "condition": "opticsopen.value == true" }, "blurradius": { "order": 23, "text": "背景模糊", "type": "slider", "min": 0, "max": 36, "value": 0, "condition": "opticsopen.value == true" }, "saturation": { "order": 24, "text": "饱和度", "type": "slider", "min": 0, "max": 2.5, "value": 1.35, "condition": "opticsopen.value == true" }, "liquidbrightness": { "order": 25, "text": "亮度", "type": "slider", "min": -0.5, "max": 0.5, "value": 0, "condition": "opticsopen.value == true" }, "contrast": { "order": 26, "text": "对比度", "type": "slider", "min": 0.3, "max": 2, "value": 1, "condition": "opticsopen.value == true" }, "corneradius": { "order": 27, "text": "圆角", "type": "slider", "min": 0, "max": 180, "value": 45, "condition": "opticsopen.value == true" }, "deptheffect": { "order": 28, "text": "景深层", "type": "bool", "value": true, "condition": "opticsopen.value == true" }, "chromaticaberration": { "order": 29, "text": "RGB 色差", "type": "bool", "value": false, "condition": "opticsopen.value == true" },
+
+    "depthopen": { "order": 30, "text": "展开 · 空间层次", "type": "bool", "value": false },
+    "lyricdepthminscale": { "order": 31, "text": "远处最小缩放", "type": "slider", "min": 0.35, "max": 0.95, "value": 0.61, "condition": "depthopen.value == true" }, "lyricdepthscalefalloff": { "order": 32, "text": "缩放衰减", "type": "slider", "min": 0.05, "max": 2, "value": 0.55, "condition": "depthopen.value == true" }, "lyricdepthscalecurve": { "order": 33, "text": "缩放曲线", "type": "slider", "min": 0.5, "max": 4, "value": 1.63, "condition": "depthopen.value == true" }, "lyricdepthalphafalloff": { "order": 34, "text": "淡出衰减", "type": "slider", "min": 0.05, "max": 2, "value": 0.65, "condition": "depthopen.value == true" }, "lyricdepthalphacurve": { "order": 35, "text": "淡出曲线", "type": "slider", "min": 0.5, "max": 4, "value": 1.12, "condition": "depthopen.value == true" }, "lyricdepthglassfloor": { "order": 36, "text": "远处玻璃保留", "type": "slider", "min": 0, "max": 1, "value": 0.15, "condition": "depthopen.value == true" }, "lyricdepthculldistance": { "order": 37, "text": "渲染距离", "type": "slider", "min": 1, "max": 6, "value": 1.5, "condition": "depthopen.value == true" },
+
+    "highlightopen": { "order": 40, "text": "展开 · 高光", "type": "bool", "value": false },
+    "highlight": { "order": 41, "text": "启用高光", "type": "bool", "value": true, "condition": "highlightopen.value == true" }, "highlightmode": { "order": 42, "text": "模式", "type": "combo", "value": 0, "condition": "highlightopen.value == true", "options": [{ "label": "默认", "value": 0 }, { "label": "环境", "value": 1 }, { "label": "纯净", "value": 2 }] }, "highlightcolor": { "order": 43, "text": "高光颜色", "type": "color", "value": "0.72 0.92 1", "condition": "highlightopen.value == true" }, "highlightalpha": { "order": 44, "text": "强度", "type": "slider", "min": 0, "max": 1, "value": 0.34, "condition": "highlightopen.value == true" }, "highlightangle": { "order": 45, "text": "光线角度", "type": "slider", "min": -3.14, "max": 3.14, "value": -1.98, "condition": "highlightopen.value == true" }, "highlightfalloff": { "order": 46, "text": "衰减", "type": "slider", "min": 0.2, "max": 5, "value": 2.1, "condition": "highlightopen.value == true" }, "highlightwidth": { "order": 47, "text": "边缘宽度", "type": "slider", "min": 0.2, "max": 6, "value": 1, "condition": "highlightopen.value == true" },
+
+    "shadowopen": { "order": 50, "text": "展开 · 阴影", "type": "bool", "value": false },
+    "shadow": { "order": 51, "text": "启用阴影", "type": "bool", "value": true, "condition": "shadowopen.value == true" }, "shadowcolor": { "order": 52, "text": "阴影颜色", "type": "color", "value": "0.01 0.06 0.12", "condition": "shadowopen.value == true" }, "shadowalpha": { "order": 53, "text": "不透明度", "type": "slider", "min": 0, "max": 1, "value": 0.18, "condition": "shadowopen.value == true" }, "shadowradius": { "order": 54, "text": "模糊半径", "type": "slider", "min": 0, "max": 80, "value": 28, "condition": "shadowopen.value == true" }, "shadowoffsetx": { "order": 55, "text": "水平偏移", "type": "slider", "min": -50, "max": 50, "value": 0, "condition": "shadowopen.value == true" }, "shadowoffsety": { "order": 56, "text": "垂直偏移", "type": "slider", "min": -50, "max": 80, "value": 16, "condition": "shadowopen.value == true" },
+
+    "materialopen": { "order": 60, "text": "展开 · 材质", "type": "bool", "value": false },
+    "tintcolor": { "order": 61, "text": "染色", "type": "color", "value": "0.18 0.52 0.72", "condition": "materialopen.value == true" }, "tintalpha": { "order": 62, "text": "染色不透明度", "type": "slider", "min": 0, "max": 0.6, "value": 0, "condition": "materialopen.value == true" }, "surfacecolor": { "order": 63, "text": "表面色", "type": "color", "value": "0.8 0.94 1", "condition": "materialopen.value == true" }, "surfacealpha": { "order": 64, "text": "表面不透明度", "type": "slider", "min": 0, "max": 0.6, "value": 0, "condition": "materialopen.value == true" },
+
+    "rendereropen": { "order": 70, "text": "展开 · 渲染器", "type": "bool", "value": false },
+    "separableblur": { "order": 71, "text": "高质量全场模糊", "type": "bool", "value": false, "condition": "rendereropen.value == true" }, "continuouscorners": { "order": 72, "text": "连续曲率圆角", "type": "bool", "value": false, "condition": "rendereropen.value == true" }, "directbackdrop": { "order": 73, "text": "直接采样背景", "type": "bool", "value": true, "condition": "rendereropen.value == true" }, "dpr": { "order": 74, "text": "渲染像素比", "type": "slider", "min": 0.5, "max": 2, "value": 1, "condition": "rendereropen.value == true" }, "blurtapcap": { "order": 75, "text": "模糊采样数", "type": "slider", "min": 3, "max": 33, "value": 9, "condition": "rendereropen.value == true" }, "blurdownsample": { "order": 76, "text": "模糊降采样", "type": "slider", "min": 1, "max": 4, "value": 2, "condition": "rendereropen.value == true" }, "kawaseblur": { "order": 77, "text": "Kawase 模糊", "type": "bool", "value": true, "condition": "rendereropen.value == true" }, "blurcache": { "order": 78, "text": "模糊缓存", "type": "bool", "value": true, "condition": "rendereropen.value == true" }, "perelementfbo": { "order": 79, "text": "局部 FBO", "type": "bool", "value": true, "condition": "rendereropen.value == true" }
+  }, "supportsaudioprocessing": false },
+  "title": "Music Lyrics Wallpaper", "type": "web", "visibility": "public"
 }

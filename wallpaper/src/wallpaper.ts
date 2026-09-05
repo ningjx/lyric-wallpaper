@@ -10,6 +10,7 @@
  * 接到这里，回调给渲染器与 CSS 变量。
  */
 import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_GAP } from "./defaults";
+import { DEFAULT_LIQUID_SETTINGS, type LiquidSettings } from "./liquid/reference-wallpaper";
 
 /** 可调节的歌词布局参数 */
 export interface WallpaperSettings {
@@ -29,6 +30,12 @@ export interface WallpaperSettings {
   fontFamily: string;
   /** 是否显示壁纸内部的液态玻璃调参面板 */
   showControls: boolean;
+  /** 正值让歌词提前显示，单位毫秒。 */
+  lyricLeadMs: number;
+  /** /query 的校准轮询频率，单位毫秒。 */
+  pollIntervalMs: number;
+  /** 液态玻璃渲染器的全部持久化设置。 */
+  liquid: LiquidSettings;
 }
 
 /** 字体选项：combo 的 value → CSS font-family 值 */
@@ -50,6 +57,9 @@ export const DEFAULT_SETTINGS: WallpaperSettings = {
   brightness: 100,
   fontFamily: DEFAULT_FONT_FAMILY,
   showControls: false,
+  lyricLeadMs: 100,
+  pollIntervalMs: 200,
+  liquid: { ...DEFAULT_LIQUID_SETTINGS },
 };
 
 type SettingsListener = (settings: WallpaperSettings) => void;
@@ -73,6 +83,8 @@ export function setupWallpaperEnvironment(onChange: SettingsListener): void {
       const brightness = readPositiveNumber(propertyValue(properties.brightness));
       const font = propertyValue(properties.font);
       const showControls = propertyValue(properties.showcontrols);
+      const lyricLeadMs = readNumber(propertyValue(properties.lyricleadms));
+      const pollIntervalMs = readPositiveNumber(propertyValue(properties.pollintervalms));
 
       if (fontSize !== null) current.fontSize = fontSize;
       if (lineGap !== null) current.lineGap = lineGap;
@@ -83,6 +95,21 @@ export function setupWallpaperEnvironment(onChange: SettingsListener): void {
       if (typeof font === "string" && font in FONTS) current.fontFamily = FONTS[font];
       const visible = readBoolean(showControls);
       if (visible !== null) current.showControls = visible;
+      if (lyricLeadMs !== null) current.lyricLeadMs = lyricLeadMs;
+      if (pollIntervalMs !== null) current.pollIntervalMs = pollIntervalMs;
+
+      for (const [property, key] of Object.entries(NUMBER_PROPERTIES)) {
+        const value = readNumber(propertyValue(properties[property]));
+        if (value !== null) (current.liquid as Record<string, unknown>)[key] = value;
+      }
+      for (const [property, key] of Object.entries(BOOLEAN_PROPERTIES)) {
+        const value = readBoolean(propertyValue(properties[property]));
+        if (value !== null) (current.liquid as Record<string, unknown>)[key] = value;
+      }
+      for (const [property, key] of Object.entries(COLOR_PROPERTIES)) {
+        const value = readColor(propertyValue(properties[property]));
+        if (value !== null) (current.liquid as Record<string, unknown>)[key] = value;
+      }
 
       onChange({ ...current });
     },
@@ -110,9 +137,45 @@ function readPositiveNumber(value: unknown): number | null {
   return n !== null && n > 0 ? n : null;
 }
 
+const NUMBER_PROPERTIES: Record<string, keyof LiquidSettings> = {
+  lyricfontscale: "lyricFontScale", lyricglasspadding: "lyricGlassPadding", lyricgap: "lyricGap",
+  lyricverticaloffset: "lyricVerticalOffset", lyricscrollspeed: "lyricScrollSpeed", lyricoffsetx: "lyricOffsetX",
+  lyricoffsety: "lyricOffsetY", lyricalignment: "lyricAlignment",
+  lyricdepthminscale: "lyricDepthMinScale", lyricdepthscalefalloff: "lyricDepthScaleFalloff", lyricdepthscalecurve: "lyricDepthScaleCurve",
+  lyricdepthalphafalloff: "lyricDepthAlphaFalloff", lyricdepthalphacurve: "lyricDepthAlphaCurve", lyricdepthglassfloor: "lyricDepthGlassFloor", lyricdepthculldistance: "lyricDepthCullDistance",
+  corneradius: "cornerRadius", refractionheight: "refractionHeight", refractionamount: "refractionAmount", blurradius: "blurRadius",
+  saturation: "saturation", liquidbrightness: "brightness", contrast: "contrast",
+  tintalpha: "tintAlpha", surfacealpha: "surfaceAlpha",
+  highlightmode: "highlightMode", highlightalpha: "highlightAlpha", highlightangle: "highlightAngle", highlightfalloff: "highlightFalloff", highlightwidth: "highlightWidth",
+  shadowalpha: "shadowAlpha", shadowradius: "shadowRadius", shadowoffsetx: "shadowOffsetX", shadowoffsety: "shadowOffsetY",
+  dpr: "dpr", blurtapcap: "blurTapCap", blurdownsample: "blurDownsample",
+};
+
+const BOOLEAN_PROPERTIES: Record<string, keyof LiquidSettings> = {
+  deptheffect: "depthEffect", chromaticaberration: "chromaticAberration", highlight: "highlight", shadow: "shadow",
+  separableblur: "separableBlur", continuouscorners: "continuousCorners", directbackdrop: "directBackdrop",
+  kawaseblur: "kawaseBlur", blurcache: "blurCache", perelementfbo: "perElementFbo",
+};
+
+const COLOR_PROPERTIES: Record<string, keyof LiquidSettings> = {
+  tintcolor: "tintColor", surfacecolor: "surfaceColor", highlightcolor: "highlightColor", shadowcolor: "shadowColor",
+};
+
 function readBoolean(value: unknown): boolean | null {
   if (typeof value === "boolean") return value;
   if (value === 1 || value === "1" || value === "true") return true;
   if (value === 0 || value === "0" || value === "false") return false;
   return null;
+}
+
+function readColor(value: unknown): [number, number, number] | null {
+  if (Array.isArray(value) && value.length >= 3) {
+    const channels = value.slice(0, 3).map(Number);
+    return channels.every(Number.isFinite) ? [channels[0], channels[1], channels[2]] : null;
+  }
+  if (typeof value !== "string") return null;
+  const channels = value.trim().split(/\s+/).slice(0, 3).map(Number);
+  return channels.length === 3 && channels.every(Number.isFinite)
+    ? [channels[0], channels[1], channels[2]]
+    : null;
 }

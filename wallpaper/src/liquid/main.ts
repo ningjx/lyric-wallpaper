@@ -5,9 +5,8 @@ import { NowPlayingApi } from "../api/nowPlaying";
 import { SyncClock } from "../player/SyncClock";
 import { MusicState } from "../player/MusicState";
 import { SceneController } from "../scene";
-import { setupWallpaperEnvironment } from "../wallpaper";
+import { DEFAULT_SETTINGS, setupWallpaperEnvironment, type WallpaperSettings } from "../wallpaper";
 import { ReferenceLyricsWallpaper } from "./reference-wallpaper";
-import { mountLiquidControls, type LiquidControls } from "./controls";
 
 const lines = parseLrc(`[00:00.00]把城市的声音调低
 [00:05.50]听见晚风穿过缝隙
@@ -25,7 +24,6 @@ const lines = parseLrc(`[00:00.00]把城市的声音调低
 const canvas = document.querySelector<HTMLCanvasElement>("#liquid-canvas")!;
 const scene = document.querySelector<HTMLElement>("#scene")!;
 const fallback = document.querySelector<HTMLElement>("#fallback-lyrics")!;
-const controls = document.querySelector<HTMLElement>("#liquid-controls")!;
 const params = new URLSearchParams(location.search);
 const still = params.get("still") === "1";
 const previewMode = still || params.get("demo") === "1";
@@ -36,19 +34,14 @@ let frame: number | null = null;
 let wallpaper: ReferenceLyricsWallpaper | null = null;
 let musicState: MusicState | null = null;
 let clock: SyncClock | null = null;
-let liquidControls: LiquidControls | null = null;
 // Wallpaper Engine 会在页面刚载入时推送一次属性值。监听器必须先于字体、
 // WebGL 等异步初始化注册，否则首次的“显示壁纸调参”事件会丢失。
-// 这个属性控制参数面板是否展开；入口按钮始终可见，可在属性通信异常时手动恢复。
-let controlsOpen = params.get("controls") === "1";
-
-function applyControlsState(): void {
-  liquidControls?.setOpen(controlsOpen);
-}
+let wallpaperSettings: WallpaperSettings = { ...DEFAULT_SETTINGS, liquid: { ...DEFAULT_SETTINGS.liquid } };
 
 setupWallpaperEnvironment((settings) => {
-  controlsOpen = settings.showControls;
-  applyControlsState();
+  wallpaperSettings = settings;
+  wallpaper?.setSettings(settings.liquid);
+  musicState?.setPollInterval(settings.pollIntervalMs);
 });
 
 function showFallback(): void {
@@ -69,20 +62,21 @@ async function boot(): Promise<void> {
     await document.fonts.ready;
     wallpaper = new ReferenceLyricsWallpaper(canvas, previewMode ? lines : []);
     await wallpaper.start();
-    liquidControls = mountLiquidControls(controls, wallpaper);
-    // 初始化完成后再次应用一次，兼容属性回调发生在 WebGL 初始化期间的情况。
-    applyControlsState();
+    wallpaper.setSettings(wallpaperSettings.liquid);
     if (previewMode) {
       new SceneController(scene).show();
     } else {
       clock = new SyncClock();
       musicState = new MusicState(new NowPlayingApi(), clock, wallpaper, new SceneController(scene));
+      musicState.setPollInterval(wallpaperSettings.pollIntervalMs);
       musicState.start();
     }
     const tick = (now: number): void => {
       if (previewMode && !still) elapsed += Math.min(.1, (now - last) / 1000);
       last = now;
-      const songTime = previewMode ? elapsed % 67 : clock?.now() ?? 0;
+      const songTime = previewMode
+        ? elapsed % 67
+        : (clock?.now() ?? 0) + wallpaperSettings.lyricLeadMs / 1000;
       wallpaper?.draw(now / 1000, previewMode ? findCurrentLine(lines, songTime) : findCurrentLineForWallpaper(songTime));
       frame = requestAnimationFrame(tick);
     };
