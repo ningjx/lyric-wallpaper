@@ -16,6 +16,9 @@ const groups: Array<{ title: string; controls: Control[] }> = [
     { key: "lyricGap", label: "歌词间距", kind: "range", min: 0, max: 120, step: 1 },
     { key: "lyricVerticalOffset", label: "垂直微调", kind: "range", min: -40, max: 40, step: 1 },
     { key: "lyricScrollSpeed", label: "滚动速度", kind: "range", min: 2, max: 20, step: .1 },
+    { key: "lyricOffsetX", label: "整体水平", kind: "range", min: -1000, max: 1000, step: 1 },
+    { key: "lyricOffsetY", label: "整体垂直", kind: "range", min: -600, max: 600, step: 1 },
+    { key: "lyricAlignment", label: "屏幕对齐", kind: "select", options: [["0", "居中"], ["1", "靠左"], ["2", "靠右"]] },
   ] },
   { title: "光学", controls: [
     { key: "refractionHeight", label: "折射高度", kind: "range", min: 0, max: 56, step: 1 },
@@ -100,7 +103,7 @@ export function mountLiquidControls(root: HTMLElement, wallpaper: ReferenceLyric
     toggle.setAttribute("aria-expanded", String(open));
     root.classList.toggle("is-open", open);
   });
-  content.addEventListener("input", (event) => {
+  const updateSetting = (event: Event): void => {
     const input = event.target as HTMLInputElement | HTMLSelectElement;
     const key = input.dataset.setting as keyof LiquidSettings | undefined;
     if (!key) return;
@@ -108,7 +111,9 @@ export function mountLiquidControls(root: HTMLElement, wallpaper: ReferenceLyric
     wallpaper.setSettings({ [key]: value } as Partial<LiquidSettings>);
     const output = input.closest<HTMLElement>("label")?.querySelector<HTMLOutputElement>("output");
     if (output) output.value = format(value);
-  });
+  };
+  content.addEventListener("input", updateSetting);
+  content.addEventListener("change", updateSetting);
   root.querySelector<HTMLButtonElement>("[data-reset]")!.addEventListener("click", () => {
     wallpaper.setSettings(DEFAULT_LIQUID_SETTINGS);
     sync(wallpaper.getSettings());

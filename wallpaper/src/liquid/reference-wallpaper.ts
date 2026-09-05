@@ -10,6 +10,7 @@ const RENDERER_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "SF Pro Text", 
 
 export interface LiquidSettings {
   lyricFontScale: number; lyricGap: number; lyricVerticalOffset: number; lyricScrollSpeed: number;
+  lyricOffsetX: number; lyricOffsetY: number; lyricAlignment: 0 | 1 | 2;
   cornerRadius: number; refractionHeight: number; refractionAmount: number; blurRadius: number;
   saturation: number; brightness: number; contrast: number; depthEffect: boolean; chromaticAberration: boolean;
   tintColor: [number, number, number]; tintAlpha: number; surfaceColor: [number, number, number]; surfaceAlpha: number;
@@ -21,6 +22,7 @@ export interface LiquidSettings {
 
 export const DEFAULT_LIQUID_SETTINGS: LiquidSettings = {
   lyricFontScale: .77, lyricGap: 120, lyricVerticalOffset: 0, lyricScrollSpeed: 5.5,
+  lyricOffsetX: 0, lyricOffsetY: 0, lyricAlignment: 0,
   cornerRadius: 29, refractionHeight: 22, refractionAmount: -34, blurRadius: 2,
   saturation: 1.42, brightness: 0, contrast: 1, depthEffect: true, chromaticAberration: true,
   tintColor: [.18, .52, .72], tintAlpha: .03, surfaceColor: [.80, .94, 1], surfaceAlpha: .04,
@@ -221,7 +223,18 @@ export class ReferenceLyricsWallpaper {
   private lyricRect(index: number, centerY: number, rowGap: number, typography: { width: number; height: number; padding: number }): { x: number; y: number; w: number; h: number } {
     const w = typography.width + typography.padding * 2;
     const h = typography.height + typography.padding * 2;
-    return { x: (this.width - w) / 2, y: centerY - h / 2 + index * rowGap, w, h };
+    const inset = Math.max(42, this.width * .08);
+    const alignedX = this.settings.lyricAlignment === 1
+      ? inset
+      : this.settings.lyricAlignment === 2
+        ? this.width - inset - w
+        : (this.width - w) / 2;
+    return {
+      x: alignedX + this.settings.lyricOffsetX,
+      y: centerY + this.settings.lyricOffsetY - h / 2 + index * rowGap,
+      w,
+      h,
+    };
   }
 
   private glassRow(index: number, rect: { x: number; y: number; w: number; h: number }): GlassElementConfig {
