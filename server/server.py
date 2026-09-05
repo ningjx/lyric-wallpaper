@@ -27,7 +27,7 @@ from .core.store import StateStore
 from .core.stats import Metrics
 from .lyrics.cache import LyricsCache
 from .lyrics.chain import LyricsChain
-from .lyrics.http import NeteaseHttp
+from .lyrics.http import HttpClient
 from .lyrics.providers import (
     FileLyricsProvider, NeteaseLyricsProvider, QQMusicLyricsProvider,
 )
@@ -79,7 +79,7 @@ def setup_file_logging(cfg: ServerConfig) -> None:
     logging.getLogger().setLevel(logging.INFO)
 
 
-def build_lyrics_chain(cfg: ServerConfig, http: NeteaseHttp) -> LyricsChain:
+def build_lyrics_chain(cfg: ServerConfig, http: HttpClient) -> LyricsChain:
     lyrics_dir = os.path.join(cfg.cache.data_dir, "lyrics")
     providers = []
     for name in cfg.lyrics.provider_order:
@@ -99,11 +99,12 @@ def build_lyrics_chain(cfg: ServerConfig, http: NeteaseHttp) -> LyricsChain:
 async def serve(cfg: ServerConfig) -> None:
     loop = asyncio.get_running_loop()
     metrics = Metrics()
-    arbiter = Arbiter(priority=cfg.source_priority)
+    arbiter = Arbiter(priority=cfg.source_priority,
+                      max_snapshot_age=cfg.music.snapshot_max_age)
     store = StateStore(arbiter)
 
     # ---- 歌词体系（aiohttp 全局 Session + Provider 链） ----
-    http = NeteaseHttp(
+    http = HttpClient(
         timeout=cfg.netease.timeout,
         retries=cfg.netease.retries,
         fuse_threshold=cfg.netease.fuse_threshold,

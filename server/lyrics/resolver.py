@@ -15,7 +15,7 @@ from ..core.stats import Metrics
 from ..core.store import StateStore
 from .cache import LyricsCache
 from .chain import LyricsChain
-from .identities import TrackIdentifiers, normalize_key
+from .identities import TrackIdentifiers, TrackMatch, normalize_key
 from .providers import LyricsResult
 from .search import TrackSearcher
 
@@ -61,13 +61,13 @@ class ResolverTask:
                     ids.netease_id = vid
                 elif searcher.vendor == "qq":
                     ids.qq_id = vid
-                # 供各歌词 Provider 回填 title/author/duration/similarity
-                ids.extra[searcher.vendor] = {
-                    "title": info.get("title") or song,
-                    "author": info.get("author") or author,
-                    "duration": info.get("duration") or 0.0,
-                    "similarity": info.get("similarity", 0),
-                }
+                # 各歌词 Provider 据此计算置信度（相似度）
+                ids.matches[searcher.vendor] = TrackMatch(
+                    title=info.get("title") or song,
+                    author=info.get("author") or author,
+                    duration=info.get("duration") or 0.0,
+                    similarity=info.get("similarity", 0),
+                )
                 sim = info.get("similarity", 0)
                 cand = TrackInfo(
                     id=vid,

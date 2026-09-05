@@ -91,9 +91,6 @@ class StateStore:
                         (self.resolved.song, self.resolved.author)) or \
                        not self.resolved.has_song
 
-        # 恢复播放、暂停等状态变化但歌不变时，保留已解析的歌词上下文。
-        if self.resolved.has_song and not song_changed:
-            new_song.seq = self.resolved.seq + 1
         self.resolved = new_song
 
         if song_changed:

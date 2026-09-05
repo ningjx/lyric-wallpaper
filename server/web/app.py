@@ -22,7 +22,7 @@ from ..config import ServerConfig
 from ..core.state import lyric_payload, query_payload
 from ..core.stats import Metrics
 from ..core.store import StateStore
-from ..lyrics.http import NeteaseHttp
+from ..lyrics.http import HttpClient
 from ..sources.registry import health_map
 from .sse import EventHub
 
@@ -57,7 +57,7 @@ def _state_snapshot(store: StateStore) -> dict:
 # ============ 应用工厂 ============
 def create_app(config: ServerConfig, store: StateStore, resolver,
                metrics: Metrics, sources: Dict, hub: EventHub,
-               http: NeteaseHttp) -> web.Application:
+               http: HttpClient) -> web.Application:
 
     @web.middleware
     async def mw(request, handler):

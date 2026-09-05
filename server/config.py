@@ -26,6 +26,7 @@ class MusicSourceConfig:
     netease_poll_interval: float = 0.2   # 网易云内存读取周期（秒）
     apple_poll_interval: float = 0.2     # Apple SMTC 读取周期（秒）
     title_recheck_interval: float = 30.0 # 窗口标题兜底重查周期（秒）
+    snapshot_max_age: float = 2.0        # 快照超过此时长判源失联（须远大于轮询间隔）
 
 
 @dataclass

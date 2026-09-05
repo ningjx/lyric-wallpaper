@@ -6,9 +6,10 @@
   - QQMusicLyricsProvider：QQ 音乐歌词（原词 + 翻译，需 qq_id）；
   - FileLyricsProvider：本地 .lrc 目录（零网络、离线可用）。
 
-统一约定：搜索阶段（search.py）已把各源的匹配结果写进 ids.extra[vendor]，
-包含 title/author/duration/similarity；Provider 只负责按其 ID 取歌词，并把
-这些匹配信息原样回填到 LyricsResult，供上层（智能选优）打分。
+职责分离：搜索阶段（search.py）已把各源的匹配元信息写进
+ids.matches[vendor]（TrackMatch）；Provider 只据其 ID 取歌词，并取该源
+的 similarity 作为「本结果置信度」回填到 LyricsResult.similarity，供上层
+（智能选优）打分。歌词正文与搜索元信息不再混在同一结构。
 """
 from __future__ import annotations
 
@@ -18,8 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .eapi import eapi_encrypt, USER_AGENT
-from .http import NeteaseHttp
-from .identities import TrackIdentifiers
+from .http import HttpClient
+from .identities import TrackIdentifiers, TrackMatch
 from .search import _parse_jsonp
 from .similarity import EXACT_MATCH_THRESHOLD
 
@@ -33,20 +34,26 @@ def _match_ok(ids: TrackIdentifiers, similarity: int) -> bool:
     return similarity >= threshold
 
 
+def _match_of(ids: TrackIdentifiers, vendor: str) -> TrackMatch:
+    """取某源搜索阶段算好的匹配元信息；缺失时返回空 TrackMatch（相似度 0）。"""
+    match = ids.matches.get(vendor)
+    return match if match is not None else TrackMatch()
+
+
 @dataclass
 class LyricsResult:
-    """规范化的歌词结果（/api/lyric 的字段来源，与具体 provider 无关）。"""
+    """规范化的歌词结果（/api/lyric 的字段来源，与具体 provider 无关）。
+
+    只承载歌词正文 + 置信度（similarity）；搜索匹配的 title/author/duration
+    属于 TrackMatch，不再在此重复。
+    """
     provider: str
     has_lyric: bool
     lrc: str = ""
     translated_lyric: str = ""
     karaoke_lyric: str = ""
     meta: dict = field(default_factory=dict)
-    # 命中歌曲的元信息 + 与本地身份的匹配分（供智能选优）
-    title: str = ""
-    author: str = ""
-    duration: float = 0.0
-    similarity: int = 0
+    similarity: int = 0   # 该结果的置信度（0-100，供智能选优排序）
 
 
 class LyricsProvider(ABC):
@@ -80,14 +87,13 @@ class NeteaseLyricsProvider(LyricsProvider):
     def requires(self) -> tuple[str, ...]:
         return ("netease_id",)
 
-    def __init__(self, http: NeteaseHttp) -> None:
+    def __init__(self, http: HttpClient) -> None:
         self.http = http
 
     async def fetch(self, ids: TrackIdentifiers) -> LyricsResult | None:
         if not ids.netease_id:
             return None
-        info = ids.extra.get("netease", {})
-        similarity = info.get("similarity", 0)
+        similarity = _match_of(ids, "netease").similarity
         if not _match_ok(ids, similarity):
             return _empty_result("netease", ids, similarity)
 
@@ -116,8 +122,7 @@ class NeteaseLyricsProvider(LyricsProvider):
             provider="netease",
             has_lyric=bool(lrc),
             lrc=lrc, translated_lyric=trans, karaoke_lyric=kara,
-            title=info.get("title", ""), author=info.get("author", ""),
-            duration=info.get("duration", 0.0), similarity=similarity,
+            similarity=similarity,
             meta={"netease_id": ids.netease_id},
         )
 
@@ -129,14 +134,13 @@ class QQMusicLyricsProvider(LyricsProvider):
     def requires(self) -> tuple[str, ...]:
         return ("qq_id",)
 
-    def __init__(self, http: NeteaseHttp) -> None:
+    def __init__(self, http: HttpClient) -> None:
         self.http = http
 
     async def fetch(self, ids: TrackIdentifiers) -> LyricsResult | None:
         if not ids.qq_id:
             return None
-        info = ids.extra.get("qq", {})
-        similarity = info.get("similarity", 0)
+        similarity = _match_of(ids, "qq").similarity
         if not _match_ok(ids, similarity):
             return _empty_result("qq", ids, similarity)
 
@@ -167,8 +171,7 @@ class QQMusicLyricsProvider(LyricsProvider):
             has_lyric=has,
             lrc=lrc if has else "",
             translated_lyric=trans,
-            title=info.get("title", ""), author=info.get("author", ""),
-            duration=info.get("duration", 0.0), similarity=similarity,
+            similarity=similarity,
             meta={"qq_id": ids.qq_id},
         )
 
@@ -195,7 +198,6 @@ class FileLyricsProvider(LyricsProvider):
                 provider="local-file",
                 has_lyric=bool(lrc),
                 lrc=lrc,
-                title=title, author=artist,
                 similarity=100,  # 本地文件视为精确命中
                 meta={"path": str(path)},
             )

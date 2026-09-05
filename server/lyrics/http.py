@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""aiohttp 异步客户端：网易云搜索/歌词请求。
+"""aiohttp 异步客户端：通用 HTTP + 稳定性能力（各歌词源共用）。
 
 特性（对应架构方案的稳定性设计）：
   - 连接池 + keep-alive（全局一个 Session）；
@@ -26,7 +26,7 @@ class HttpFuseError(Exception):
     """熔断打开期间的异常（调用方按「不可用」处理）。"""
 
 
-class NeteaseHttp:
+class HttpClient:
     def __init__(self, session: Optional[aiohttp.ClientSession] = None,
                  *, timeout: float = 5.0, retries: int = 3,
                  fuse_threshold: int = 3, fuse_cooldown: float = 60.0,
@@ -97,7 +97,7 @@ class NeteaseHttp:
     async def _request(self, key: str, coro_fn) -> Any:
         """单飞 + 重试 + 熔断的统一封装。"""
         if self.is_fused():
-            raise HttpFuseError("netease API circuit open")
+            raise HttpFuseError("http client circuit open")
 
         loop = asyncio.get_running_loop()
         fut = self._inflight.get(key)

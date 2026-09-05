@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from .eapi import eapi_encrypt, USER_AGENT
-from .http import NeteaseHttp
+from .http import HttpClient
 from .identities import TrackIdentifiers, normalize_key
 from .similarity import calculate_similarity, EXACT_MATCH_THRESHOLD
 
@@ -73,7 +73,7 @@ def _pick_best(local_title: str, local_artist: str,
 class NeteaseSearcher(TrackSearcher):
     vendor = "netease"
 
-    def __init__(self, http: NeteaseHttp, *, hit_ttl: float = 300.0,
+    def __init__(self, http: HttpClient, *, hit_ttl: float = 300.0,
                  negative_ttl: float = 15.0) -> None:
         self.http = http
         self._hit_ttl = hit_ttl
@@ -128,7 +128,7 @@ class NeteaseSearcher(TrackSearcher):
 class QQMusicSearcher(TrackSearcher):
     vendor = "qq"
 
-    def __init__(self, http: NeteaseHttp, *, hit_ttl: float = 300.0,
+    def __init__(self, http: HttpClient, *, hit_ttl: float = 300.0,
                  negative_ttl: float = 15.0) -> None:
         self.http = http
         self._hit_ttl = hit_ttl

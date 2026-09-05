@@ -14,10 +14,13 @@ from server.core.state import (
 from server.core.store import ResolvedPlayer, StateStore
 from server.lyrics.chain import LyricsChain
 from server.lyrics.cache import LyricsCache
-from server.lyrics.http import HttpFuseError, NeteaseHttp
+from server.lyrics.http import HttpFuseError, HttpClient
 from server.lyrics.identities import TrackIdentifiers
 from server.lyrics.providers import (
     FileLyricsProvider, LyricsProvider, LyricsResult,
+)
+from server.lyrics.similarity import (
+    calculate_similarity, EXACT_MATCH_THRESHOLD,
 )
 
 
@@ -166,8 +169,9 @@ class _StubProvider(LyricsProvider):
         return self._result(ids)
 
 
-def _ok(provider="x"):
-    return lambda ids: LyricsResult(provider=provider, has_lyric=True, lrc="L")
+def _ok(provider="x", sim=100):
+    return lambda ids: LyricsResult(provider=provider, has_lyric=True,
+                                    lrc="L", similarity=sim)
 
 
 def test_chain_falls_back_on_failure():
@@ -180,7 +184,7 @@ def test_chain_falls_back_on_failure():
     assert res is not None and res.provider == "good"
 
 
-def test_chain_skips_cooled_down_provider(tmp_path):
+def test_chain_skips_cooled_down_provider():
     bad = _StubProvider("bad", RuntimeError("boom"), cooldown=5.0)
     good = _StubProvider("good", _ok("good"))
     chain = LyricsChain([bad, good], total_timeout=5.0)
@@ -256,8 +260,8 @@ class _BoomSession:
 
 def test_http_fuse_opens_after_threshold():
     async def main():
-        http = NeteaseHttp(session=_BoomSession(), timeout=2.0, retries=0,
-                           fuse_threshold=3, fuse_cooldown=60.0)
+        http = HttpClient(session=_BoomSession(), timeout=2.0, retries=0,
+                         fuse_threshold=3, fuse_cooldown=60.0)
         for _ in range(3):
             assert await http.get_json("http://x/a", key="a") is None
         assert http.is_fused()
@@ -267,3 +271,62 @@ def test_http_fuse_opens_after_threshold():
         except HttpFuseError:
             pass
     asyncio.run(main())
+
+
+# ============ 歌曲相似度算法 ============
+def test_similarity_exact_and_version():
+    assert calculate_similarity("晴天", "周杰伦", "晴天", "周杰伦") >= EXACT_MATCH_THRESHOLD
+    # 本地原版 vs 云端 Live 版：应判不匹配
+    assert calculate_similarity("晴天", "周杰伦", "晴天 (Live)", "周杰伦") < EXACT_MATCH_THRESHOLD
+    # remix 版本关键词：应判不匹配
+    assert calculate_similarity("Shape of You", "Ed Sheeran",
+                                "Shape of You (Remix)", "Ed Sheeran") < EXACT_MATCH_THRESHOLD
+
+
+def test_similarity_case_and_fullwidth():
+    # 大小写不敏感
+    assert calculate_similarity("Night Dancer", "yoasobi",
+                                "night dancer", "YOASOBI") >= EXACT_MATCH_THRESHOLD
+    # 全角转半角
+    assert calculate_similarity("Ｓｈａｐｅ　ｏｆ　Ｙｏｕ", "Ｅｄ　Ｓｈｅｅｒａｎ",
+                                "Shape of You", "Ed Sheeran") >= EXACT_MATCH_THRESHOLD
+
+
+def test_similarity_wrong_artist_rejected():
+    # 同名歌但歌手完全不同：应判不匹配
+    assert calculate_similarity("Hello", "Adele", "Hello", "Lionel Richie") < EXACT_MATCH_THRESHOLD
+
+
+# ============ eapi 加密 ============
+def test_eapi_encrypt_output_shape():
+    from server.lyrics.eapi import eapi_encrypt
+    params = eapi_encrypt("https://interface3.music.163.com/eapi/song/lyric/v1",
+                          {"id": "123", "lv": "0"})
+    # 大写 hex，且长度是 16 字节块的整数倍
+    assert params and all(c in "0123456789ABCDEF" for c in params)
+    assert len(params) % 32 == 0
+
+
+# ============ 智能选优 ============
+def test_chain_smart_select_similarity_first():
+    # 相似度高的源胜出
+    qq = _StubProvider("qq", _ok("qq", sim=90), requires=("qq_id",))
+    ne = _StubProvider("netease", _ok("netease", sim=95), requires=("netease_id",))
+    chain = LyricsChain([ne, qq], total_timeout=5.0, parallel=True)
+    ids = TrackIdentifiers(title="歌", artist="手", netease_id="1", qq_id="2")
+    res = asyncio.run(chain.fetch(ids))
+    assert res is not None and res.provider == "netease"
+
+
+def test_chain_smart_select_completeness_tiebreak():
+    # 相似度相同，齐全度（有翻译）高者胜出
+    qq = _StubProvider("qq", lambda ids: LyricsResult(
+        provider="qq", has_lyric=True, lrc="L", translated_lyric="T",
+        similarity=100), requires=("qq_id",))
+    ne = _StubProvider("netease", lambda ids: LyricsResult(
+        provider="netease", has_lyric=True, lrc="L", similarity=100),
+        requires=("netease_id",))
+    chain = LyricsChain([ne, qq], total_timeout=5.0, parallel=True)
+    ids = TrackIdentifiers(title="歌", artist="手", netease_id="1", qq_id="2")
+    res = asyncio.run(chain.fetch(ids))
+    assert res is not None and res.provider == "qq"
