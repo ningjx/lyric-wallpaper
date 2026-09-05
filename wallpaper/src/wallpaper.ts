@@ -85,7 +85,7 @@ export function setupWallpaperEnvironment(onChange: SettingsListener): void {
       const showControls = propertyValue(properties.showcontrols);
       const lyricLeadMs = readNumber(propertyValue(properties.lyricleadms));
       const pollIntervalMs = readPositiveNumber(propertyValue(properties.pollintervalms));
-      const backgroundImage = propertyValue(properties.backgroundimage);
+      const backgroundDirectory = propertyValue(properties.backgrounddirectory);
 
       if (fontSize !== null) current.fontSize = fontSize;
       if (lineGap !== null) current.lineGap = lineGap;
@@ -98,7 +98,7 @@ export function setupWallpaperEnvironment(onChange: SettingsListener): void {
       if (visible !== null) current.showControls = visible;
       if (lyricLeadMs !== null) current.lyricLeadMs = lyricLeadMs;
       if (pollIntervalMs !== null) current.pollIntervalMs = pollIntervalMs;
-      if (typeof backgroundImage === "string") current.liquid.backgroundImage = backgroundImage;
+      if (typeof backgroundDirectory === "string") current.liquid.backgroundDirectory = backgroundDirectory;
 
       for (const [property, key] of Object.entries(NUMBER_PROPERTIES)) {
         const value = readNumber(propertyValue(properties[property]));
@@ -140,7 +140,7 @@ function readPositiveNumber(value: unknown): number | null {
 }
 
 const NUMBER_PROPERTIES: Record<string, keyof LiquidSettings> = {
-  backgroundlayout: "backgroundLayout", backgroundscale: "backgroundScale", backgroundoffsetx: "backgroundOffsetX", backgroundoffsety: "backgroundOffsetY",
+  backgroundintervalseconds: "backgroundIntervalSeconds", backgroundlayout: "backgroundLayout", backgroundscale: "backgroundScale", backgroundoffsetx: "backgroundOffsetX", backgroundoffsety: "backgroundOffsetY",
   lyricfontscale: "lyricFontScale", lyricglasspadding: "lyricGlassPadding", lyricgap: "lyricGap",
   lyricverticaloffset: "lyricVerticalOffset", lyricscrollspeed: "lyricScrollSpeed", lyricoffsetx: "lyricOffsetX",
   lyricoffsety: "lyricOffsetY", lyricalignment: "lyricAlignment",
