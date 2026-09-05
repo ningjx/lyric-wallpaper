@@ -36,6 +36,19 @@ let frame: number | null = null;
 let wallpaper: ReferenceLyricsWallpaper | null = null;
 let musicState: MusicState | null = null;
 let clock: SyncClock | null = null;
+// Wallpaper Engine 会在页面刚载入时推送一次属性值。监听器必须先于字体、
+// WebGL 等异步初始化注册，否则首次的“显示壁纸调参”事件会丢失。
+let controlsVisible = params.get("controls") === "1";
+
+function applyControlsVisibility(): void {
+  controls.hidden = !controlsVisible;
+}
+
+setupWallpaperEnvironment((settings) => {
+  controlsVisible = settings.showControls;
+  applyControlsVisibility();
+});
+applyControlsVisibility();
 
 function showFallback(): void {
   document.documentElement.classList.add("fallback");
@@ -56,9 +69,8 @@ async function boot(): Promise<void> {
     wallpaper = new ReferenceLyricsWallpaper(canvas, previewMode ? lines : []);
     await wallpaper.start();
     mountLiquidControls(controls, wallpaper);
-    const setControlsVisible = (visible: boolean): void => { controls.hidden = !visible; };
-    setControlsVisible(params.get("controls") === "1");
-    setupWallpaperEnvironment((settings) => setControlsVisible(settings.showControls));
+    // 初始化完成后再次应用一次，兼容属性回调发生在 WebGL 初始化期间的情况。
+    applyControlsVisibility();
     if (previewMode) {
       new SceneController(scene).show();
     } else {
