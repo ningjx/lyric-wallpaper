@@ -37,6 +37,7 @@ export class ReferenceLyricsWallpaper {
   private hasPositioned = false;
   private active = -1;
   private lastFrame = 0;
+  private lastLayoutScrollY = Number.NaN;
   private width = 0;
   private height = 0;
   private disposed = false;
@@ -44,6 +45,7 @@ export class ReferenceLyricsWallpaper {
   private readonly textMeasure = document.createElement("canvas").getContext("2d")!;
   private readonly glyphMeasureCanvas = document.createElement("canvas");
   private readonly glyphMeasure = this.glyphMeasureCanvas.getContext("2d", { willReadFrequently: true })!;
+  private readonly opticalOffsetRatios = new Map<string, number>();
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -74,9 +76,9 @@ export class ReferenceLyricsWallpaper {
     if (this.disposed) return;
     const delta = this.lastFrame ? Math.min(.08, Math.max(0, seconds - this.lastFrame)) : .016;
     this.lastFrame = seconds;
-    if (active !== this.active) this.rebuild(active);
     const rowGap = this.rowGap();
-    const target = Math.max(0, active) * rowGap;
+    const nextActive = Math.max(0, Math.min(active, this.lyrics.length - 1));
+    const target = nextActive * rowGap;
     if (!this.hasPositioned) {
       this.scrollY = target;
       this.velocity = 0;
@@ -87,6 +89,10 @@ export class ReferenceLyricsWallpaper {
       this.velocity = next.velocity;
     }
     this.renderer.setScrollY(this.scrollY);
+    if (nextActive !== this.active || Math.abs(this.scrollY - this.lastLayoutScrollY) > .05) {
+      this.rebuild(nextActive, this.scrollY / rowGap);
+      this.lastLayoutScrollY = this.scrollY;
+    }
 
     this.renderer.render();
   }
@@ -106,12 +112,13 @@ export class ReferenceLyricsWallpaper {
     if (previousDpr !== this.settings.dpr || previousDownsample !== this.settings.blurDownsample) {
       this.renderer.resize(this.width, this.height);
     }
-    this.rebuild(this.active);
+    this.rebuild(this.active, this.scrollY / this.rowGap());
+    this.lastLayoutScrollY = this.scrollY;
     this.renderer.markAllDirty();
     this.renderer.requestRender();
   }
 
-  private rebuild(active: number): void {
+  private rebuild(active: number, focus = active): void {
     if (!this.width || !this.height) return;
     this.active = Math.max(0, Math.min(active, this.lyrics.length - 1));
     const rowGap = this.rowGap();
@@ -120,9 +127,10 @@ export class ReferenceLyricsWallpaper {
     const first = Math.max(0, this.active - ROW_WINDOW);
     const last = Math.min(this.lyrics.length - 1, this.active + ROW_WINDOW);
     for (let index = first; index <= last; index++) {
-      const distance = Math.abs(index - this.active);
-      const typography = this.fitTypography(this.lyrics[index].text, distance === 0 ? 700 : 600, distance === 0 ? 1 : .72);
-      const alpha = [1, .58, .28, .12, .04][Math.min(distance, 4)];
+      const distance = Math.abs(index - focus);
+      const emphasis = this.smoothstep(Math.max(0, 1 - distance));
+      const typography = this.fitTypography(this.lyrics[index].text, 700, .72 + .28 * emphasis);
+      const alpha = this.lyricAlpha(distance, emphasis);
       const rect = this.lyricRect(index, centerY, rowGap, typography);
       rows.push(this.glassRow(index, rect));
       const textRect = { ...rect, y: rect.y + typography.opticalOffset + this.settings.lyricVerticalOffset };
@@ -133,9 +141,9 @@ export class ReferenceLyricsWallpaper {
           content: this.lyrics[index].text,
           color: [0.94, 0.985, 1, alpha],
           fontSizePx: typography.fontSize,
-          fontWeight: distance === 0 ? 700 : 600,
+          fontWeight: 700,
           align: "center",
-          halo: distance === 0 ? "dark" : "none",
+          halo: "dark",
         },
       });
     }
@@ -145,6 +153,13 @@ export class ReferenceLyricsWallpaper {
   }
 
   private rowGap(): number { return Math.min(240, Math.max(96, this.height * .135) + this.settings.lyricGap); }
+
+  private smoothstep(value: number): number { return value * value * (3 - 2 * value); }
+
+  private lyricAlpha(distance: number, emphasis: number): number {
+    if (distance <= 1) return .58 + .42 * emphasis;
+    return Math.max(.04, .58 * (3 - distance) / 2);
+  }
 
   private fitTypography(text: string, fontWeight: number, scale: number): { fontSize: number; width: number; height: number; padding: number; opticalOffset: number } {
     let fontSize = Math.max(28, this.width * FONT_RATIO * scale * this.settings.lyricFontScale);
@@ -166,7 +181,13 @@ export class ReferenceLyricsWallpaper {
     const ascent = metrics.actualBoundingBoxAscent || fontSize * .8;
     const descent = metrics.actualBoundingBoxDescent || fontSize * .2;
     const height = Math.max(fontSize, ascent + descent);
-    return { width: Math.ceil(metrics.width), height: Math.ceil(height), opticalOffset: this.measureOpticalOffset(text, fontWeight, fontSize, height) };
+    const key = `${fontWeight}:${text}`;
+    let opticalOffsetRatio = this.opticalOffsetRatios.get(key);
+    if (opticalOffsetRatio == null) {
+      opticalOffsetRatio = this.measureOpticalOffset(text, fontWeight, fontSize, height) / fontSize;
+      this.opticalOffsetRatios.set(key, opticalOffsetRatio);
+    }
+    return { width: Math.ceil(metrics.width), height: Math.ceil(height), opticalOffset: opticalOffsetRatio * fontSize };
   }
 
   private measureOpticalOffset(text: string, fontWeight: number, fontSize: number, glyphHeight: number): number {
