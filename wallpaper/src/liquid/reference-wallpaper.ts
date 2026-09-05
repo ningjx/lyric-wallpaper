@@ -139,6 +139,10 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   }
 
   setSettings(patch: Partial<LiquidSettings>): void {
+    // 使用变更前的行距保留当前滚动位置对应的歌词序号。否则调节行距时会
+    // 用新行距除旧 scrollY，造成焦点跳行，掩盖了行距本身的视觉变化。
+    const previousRowGap = this.rowGap();
+    const previousFocus = previousRowGap > 0 ? this.scrollY / previousRowGap : this.active;
     const previousDpr = this.settings.dpr;
     const previousDownsample = this.settings.blurDownsample;
     this.settings = { ...this.settings, ...patch };
@@ -146,7 +150,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     if (previousDpr !== this.settings.dpr || previousDownsample !== this.settings.blurDownsample) {
       this.renderer.resize(this.width, this.height);
     }
-    this.rebuild(this.active, this.scrollY / this.rowGap());
+    this.rebuild(this.active, previousFocus);
     this.lastLayoutScrollY = this.scrollY;
     this.renderer.markAllDirty();
     this.renderer.requestRender();
@@ -193,17 +197,24 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     this.renderer.setScrollY(this.scrollY);
   }
 
-  private rowGap(): number { return Math.min(240, Math.max(96, this.height * .135) + this.settings.lyricGap); }
+  private rowGap(): number {
+    // lyricGap 是用户可见的额外间距，不能再被总行距上限吞掉。
+    return Math.max(96, this.height * .135 + this.settings.lyricGap);
+  }
 
   private depthScale(distance: number): number {
     const s = this.settings;
+    // (1 + d)^curve - 1 保持主歌词 d=0 为 0，同时避免 d=1 在所有曲线下
+    // 都恒定为 1；相邻歌词也会随曲线参数自然变化。
+    const shapedDistance = (1 + distance) ** s.lyricDepthScaleCurve - 1;
     return s.lyricDepthMinScale + (1 - s.lyricDepthMinScale) /
-      (1 + s.lyricDepthScaleFalloff * distance ** s.lyricDepthScaleCurve);
+      (1 + s.lyricDepthScaleFalloff * shapedDistance);
   }
 
   private depthAlpha(distance: number): number {
     const s = this.settings;
-    return Math.exp(-s.lyricDepthAlphaFalloff * distance ** s.lyricDepthAlphaCurve);
+    const shapedDistance = (1 + distance) ** s.lyricDepthAlphaCurve - 1;
+    return Math.exp(-s.lyricDepthAlphaFalloff * shapedDistance);
   }
 
   private depthGlassStrength(alpha: number): number {
@@ -212,14 +223,16 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   }
 
   private fitTypography(text: string, fontWeight: number, scale: number): { fontSize: number; width: number; height: number; padding: number; opticalOffset: number } {
-    let fontSize = Math.max(28, this.width * FONT_RATIO * scale * this.settings.lyricFontScale);
-    const maxWidth = Math.min(this.width * .82, 1480);
+    let fontSize = Math.max(18, this.width * FONT_RATIO * scale * this.settings.lyricFontScale);
+    // 大屏上的歌词需要更大的可用宽度；否则较长的某一句会被限宽反算，
+    // 看起来像该行完全不响应字号调节。
+    const maxWidth = Math.min(this.width * .9, 1800);
     for (let pass = 0; pass < 3; pass++) {
       const metrics = this.measureText(text, fontWeight, fontSize);
       const padding = this.lyricGlassPadding();
       const available = maxWidth - padding * 2;
       if (metrics.width <= available) return { fontSize, ...metrics, padding };
-      fontSize = Math.max(28, fontSize * available / metrics.width);
+      fontSize = Math.max(18, fontSize * available / metrics.width);
     }
     const metrics = this.measureText(text, fontWeight, fontSize);
     return { fontSize, ...metrics, padding: this.lyricGlassPadding() };
@@ -305,10 +318,9 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
       tintColor: [...this.settings.tintColor, this.settings.tintAlpha * strength],
       highlight: this.settings.highlight ? { mode: this.settings.highlightMode, color: this.settings.highlightColor, angle: this.settings.highlightAngle, falloff: this.settings.highlightFalloff, alpha: this.settings.highlightAlpha * strength, widthDp: this.settings.highlightWidth } : null,
       outerShadow: this.settings.shadow ? { radius: this.settings.shadowRadius, alpha: this.settings.shadowAlpha * strength, offsetX: this.settings.shadowOffsetX, offsetY: this.settings.shadowOffsetY, color: this.settings.shadowColor } : null,
-      // Scroll changes the card's screen position every frame. Sampling the
-      // isolated scene preserves that position through the renderer's blur
-      // path; the independent wallpaper cache only works for fixed elements.
-      independentBackdrop: false,
+      // 高质量模糊以原始壁纸为统一背板：上游渲染器会缓存同半径的全场
+      // 高斯结果，滚动时也不会被场景模糊的每帧限流回退为清晰纹理。
+      independentBackdrop: this.settings.separableBlur,
       directBackdropSample: false,
       // The inline wallpaper path is bounded to this card's pixels and keeps
       // scroll coordinates exact. The optional high-quality setting switches
