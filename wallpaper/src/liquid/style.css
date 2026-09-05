@@ -20,8 +20,9 @@ html.fallback #fallback-lyrics { display: block; }
 .offline-spinner { width: 14px; height: 14px; border: 2px solid rgb(215 243 255 / .3); border-top-color: rgb(220 248 255 / .94); border-radius: 50%; animation: liquid-spin .85s linear infinite; }
 @keyframes liquid-spin { to { transform: rotate(360deg); } }
 #liquid-controls {
-  position: fixed; z-index: 10; right: 24px; bottom: 24px;
+  position: fixed; z-index: 10; top: 24px; right: 24px;
   width: calc(100% - 48px); max-width: 920px; color: #eff8ff; font-family: "ChillRound", "Microsoft YaHei UI", sans-serif;
+  display: flex; flex-direction: column; align-items: stretch;
 }
 .liquid-controls-toggle, .liquid-controls-title button {
   appearance: none; border: 1px solid rgb(205 240 255 / .42); color: inherit; cursor: pointer;
@@ -35,7 +36,8 @@ html.fallback #fallback-lyrics { display: block; }
 .liquid-controls-toggle span { font-size: 18px; line-height: .6; transform: rotate(180deg); transition: transform .2s ease; }
 #liquid-controls.is-open .liquid-controls-toggle span { transform: rotate(0); }
 .liquid-controls-panel {
-  max-height: min(58vh, 590px); overflow: auto; margin-bottom: 10px; padding: 16px;
+  /* 展开方向固定向下，永不与底部任务栏重叠；其余内容由面板内部滚动。 */
+  max-height: min(56vh, 540px); overflow: auto; margin-top: 10px; padding: 16px;
   border: 1px solid rgb(208 241 255 / .36); border-radius: 24px; background: rgb(11 24 39 / .72);
   backdrop-filter: blur(28px) saturate(1.35); box-shadow: inset 0 1px rgb(255 255 255 / .2), 0 18px 60px rgb(0 0 0 / .34);
 }
@@ -54,7 +56,7 @@ html.fallback #fallback-lyrics { display: block; }
 .liquid-control select { min-width: 80px; justify-self: end; border: 1px solid rgb(255 255 255 / .18); border-radius: 7px; color: inherit; background: rgb(7 16 28 / .8); font: inherit; padding: 3px 5px; }
 .liquid-control-checkbox, .liquid-control-color, .liquid-control-select { grid-template-columns: 1fr auto; }
 @media (max-width: 760px) {
-  #liquid-controls { right: 12px; bottom: 12px; width: calc(100% - 24px); }
+  #liquid-controls { top: 12px; right: 12px; width: calc(100% - 24px); }
   .liquid-controls-panel { padding: 12px; border-radius: 18px; max-height: 52vh; }
   .liquid-controls-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .liquid-controls-group { padding: 8px; }
