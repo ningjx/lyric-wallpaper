@@ -7,8 +7,10 @@ const FONT_RATIO = .050;
 const ROW_WINDOW = 4;
 const LYRIC_SPRING = 15;
 const WALLPAPER_SOURCE = `${import.meta.env.BASE_URL}backgrounds/wallhaven-vpolwm.jpg`;
+const RENDERER_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
 export interface LiquidSettings {
+  lyricFontScale: number; lyricGap: number; lyricVerticalOffset: number;
   cornerRadius: number; refractionHeight: number; refractionAmount: number; blurRadius: number;
   saturation: number; brightness: number; contrast: number; depthEffect: boolean; chromaticAberration: boolean;
   tintColor: [number, number, number]; tintAlpha: number; surfaceColor: [number, number, number]; surfaceAlpha: number;
@@ -19,9 +21,10 @@ export interface LiquidSettings {
 }
 
 export const DEFAULT_LIQUID_SETTINGS: LiquidSettings = {
-  cornerRadius: 72, refractionHeight: 22, refractionAmount: -34, blurRadius: 18,
+  lyricFontScale: .77, lyricGap: 120, lyricVerticalOffset: 0,
+  cornerRadius: 29, refractionHeight: 22, refractionAmount: -34, blurRadius: 2,
   saturation: 1.42, brightness: 0, contrast: 1, depthEffect: true, chromaticAberration: true,
-  tintColor: [.18, .52, .72], tintAlpha: .025, surfaceColor: [.80, .94, 1], surfaceAlpha: .035,
+  tintColor: [.18, .52, .72], tintAlpha: .03, surfaceColor: [.80, .94, 1], surfaceAlpha: .04,
   highlight: true, highlightMode: 0, highlightColor: [.72, .92, 1], highlightAlpha: .34, highlightAngle: -1.05, highlightFalloff: 2.1, highlightWidth: 1,
   shadow: true, shadowColor: [.01, .06, .12], shadowAlpha: .18, shadowRadius: 28, shadowOffsetX: 0, shadowOffsetY: 16,
   separableBlur: true, continuousCorners: true, directBackdrop: true,
@@ -39,6 +42,9 @@ export class ReferenceLyricsWallpaper {
   private height = 0;
   private disposed = false;
   private settings: LiquidSettings = { ...DEFAULT_LIQUID_SETTINGS };
+  private readonly textMeasure = document.createElement("canvas").getContext("2d")!;
+  private readonly glyphMeasureCanvas = document.createElement("canvas");
+  private readonly glyphMeasure = this.glyphMeasureCanvas.getContext("2d", { willReadFrequently: true })!;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -109,30 +115,25 @@ export class ReferenceLyricsWallpaper {
   private rebuild(active: number): void {
     if (!this.width || !this.height) return;
     this.active = Math.max(0, Math.min(active, this.lyrics.length - 1));
-    const panel = this.panel();
     const rowGap = this.rowGap();
-    const rowHeight = Math.max(68, rowGap * .78);
-    const centerY = panel.y + panel.h / 2;
-    const rows: GlassElementConfig[] = [this.glassPanel(panel)];
+    const centerY = this.height / 2;
+    const rows: GlassElementConfig[] = [];
     const first = Math.max(0, this.active - ROW_WINDOW);
     const last = Math.min(this.lyrics.length - 1, this.active + ROW_WINDOW);
     for (let index = first; index <= last; index++) {
       const distance = Math.abs(index - this.active);
-      const fontSize = Math.max(28, this.width * FONT_RATIO * (distance === 0 ? 1 : .72));
+      const typography = this.fitTypography(this.lyrics[index].text, distance === 0 ? 700 : 600, distance === 0 ? 1 : .72);
       const alpha = [1, .58, .28, .12, .04][Math.min(distance, 4)];
+      const rect = this.lyricRect(index, centerY, rowGap, typography);
+      rows.push(this.glassRow(index, rect));
+      const textRect = { ...rect, y: rect.y + typography.opticalOffset + this.settings.lyricVerticalOffset };
       rows.push({
-        ...this.base(`lyric-${index}`, "text", {
-          x: panel.x + 26,
-          y: centerY - rowHeight / 2 + index * rowGap,
-          w: panel.w - 52,
-          h: rowHeight,
-        }),
+        ...this.base(`lyric-${index}`, "text", textRect),
         scroll: true,
-        clipRect: { x: panel.x + 18, y: panel.y + 18, w: panel.w - 36, h: panel.h - 36 },
         text: {
           content: this.lyrics[index].text,
           color: [0.94, 0.985, 1, alpha],
-          fontSizePx: fontSize,
+          fontSizePx: typography.fontSize,
           fontWeight: distance === 0 ? 700 : 600,
           align: "center",
           halo: distance === 0 ? "dark" : "none",
@@ -144,17 +145,68 @@ export class ReferenceLyricsWallpaper {
     this.renderer.setScrollY(this.scrollY);
   }
 
-  private panel(): { x: number; y: number; w: number; h: number } {
-    const w = Math.min(this.width * .72, 1300);
-    const h = Math.min(this.height * .64, 620);
-    return { x: (this.width - w) / 2, y: (this.height - h) / 2, w, h };
+  private rowGap(): number { return Math.min(240, Math.max(96, this.height * .135) + this.settings.lyricGap); }
+
+  private fitTypography(text: string, fontWeight: number, scale: number): { fontSize: number; width: number; height: number; padding: number; opticalOffset: number } {
+    let fontSize = Math.max(28, this.width * FONT_RATIO * scale * this.settings.lyricFontScale);
+    const maxWidth = Math.min(this.width * .82, 1480);
+    for (let pass = 0; pass < 3; pass++) {
+      const metrics = this.measureText(text, fontWeight, fontSize);
+      const padding = Math.max(18, Math.round(fontSize * .26));
+      const available = maxWidth - padding * 2;
+      if (metrics.width <= available) return { fontSize, ...metrics, padding };
+      fontSize = Math.max(28, fontSize * available / metrics.width);
+    }
+    const metrics = this.measureText(text, fontWeight, fontSize);
+    return { fontSize, ...metrics, padding: Math.max(18, Math.round(fontSize * .26)) };
   }
 
-  private rowGap(): number { return Math.min(154, Math.max(92, this.height * .142)); }
+  private measureText(text: string, fontWeight: number, fontSize: number): { width: number; height: number; opticalOffset: number } {
+    this.textMeasure.font = `${fontWeight} ${fontSize}px ${RENDERER_FONT_FAMILY}`;
+    const metrics = this.textMeasure.measureText(text);
+    const ascent = metrics.actualBoundingBoxAscent || fontSize * .8;
+    const descent = metrics.actualBoundingBoxDescent || fontSize * .2;
+    const height = Math.max(fontSize, ascent + descent);
+    return { width: Math.ceil(metrics.width), height: Math.ceil(height), opticalOffset: this.measureOpticalOffset(text, fontWeight, fontSize, height) };
+  }
 
-  private glassPanel(rect: { x: number; y: number; w: number; h: number }): GlassElementConfig {
+  private measureOpticalOffset(text: string, fontWeight: number, fontSize: number, glyphHeight: number): number {
+    const padding = Math.ceil(fontSize * .45);
+    const width = Math.ceil(this.textMeasure.measureText(text).width + padding * 2);
+    const height = Math.ceil(glyphHeight + padding * 2);
+    const canvas = this.glyphMeasureCanvas;
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = this.glyphMeasure;
+    ctx.clearRect(0, 0, width, height);
+    ctx.font = `${fontWeight} ${fontSize}px ${RENDERER_FONT_FAMILY}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#fff";
+    ctx.fillText(text, width / 2, height / 2 + .5);
+    const pixels = ctx.getImageData(0, 0, width, height).data;
+    let top = height;
+    let bottom = -1;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (pixels[(y * width + x) * 4 + 3] >= 128) {
+          top = Math.min(top, y);
+          bottom = Math.max(bottom, y);
+        }
+      }
+    }
+    return bottom < top ? 0 : height / 2 - (top + bottom + 1) / 2;
+  }
+
+  private lyricRect(index: number, centerY: number, rowGap: number, typography: { width: number; height: number; padding: number }): { x: number; y: number; w: number; h: number } {
+    const w = typography.width + typography.padding * 2;
+    const h = typography.height + typography.padding * 2;
+    return { x: (this.width - w) / 2, y: centerY - h / 2 + index * rowGap, w, h };
+  }
+
+  private glassRow(index: number, rect: { x: number; y: number; w: number; h: number }): GlassElementConfig {
     return {
-      ...this.base("lyrics-glass-panel", "glass-shape", rect),
+      ...this.base(`lyric-glass-${index}`, "glass-shape", rect),
       cornerRadius: Math.min(this.settings.cornerRadius, rect.h * .45),
       refractionHeight: this.settings.refractionHeight,
       refractionAmount: this.settings.refractionAmount,
@@ -172,7 +224,7 @@ export class ReferenceLyricsWallpaper {
       directBackdropSample: this.settings.directBackdrop,
       useSeparableBlur: this.settings.separableBlur,
       useContinuousSdf: this.settings.continuousCorners,
-      scroll: false,
+      scroll: true,
     };
   }
 

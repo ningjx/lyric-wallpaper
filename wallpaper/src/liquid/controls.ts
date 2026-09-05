@@ -11,6 +11,11 @@ type Control = {
 };
 
 const groups: Array<{ title: string; controls: Control[] }> = [
+  { title: "歌词排版", controls: [
+    { key: "lyricFontScale", label: "字体大小", kind: "range", min: .5, max: 1.6, step: .01 },
+    { key: "lyricGap", label: "歌词间距", kind: "range", min: 0, max: 120, step: 1 },
+    { key: "lyricVerticalOffset", label: "垂直微调", kind: "range", min: -40, max: 40, step: 1 },
+  ] },
   { title: "光学", controls: [
     { key: "refractionHeight", label: "折射高度", kind: "range", min: 0, max: 56, step: 1 },
     { key: "refractionAmount", label: "折射强度", kind: "range", min: -80, max: 20, step: 1 },
