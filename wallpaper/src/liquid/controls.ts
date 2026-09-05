@@ -77,7 +77,12 @@ const groups: Array<{ title: string; controls: Control[] }> = [
   ] },
 ];
 
-export function mountLiquidControls(root: HTMLElement, wallpaper: ReferenceLyricsWallpaper): void {
+export interface LiquidControls {
+  /** 展开或收起完整参数面板；入口按钮始终保留，避免丢失恢复路径。 */
+  setOpen(open: boolean): void;
+}
+
+export function mountLiquidControls(root: HTMLElement, wallpaper: ReferenceLyricsWallpaper): LiquidControls {
   root.innerHTML = `
     <button class="liquid-controls-toggle" type="button" aria-expanded="false">液态玻璃参数 <span>⌃</span></button>
     <div class="liquid-controls-panel" hidden>
@@ -107,12 +112,12 @@ export function mountLiquidControls(root: HTMLElement, wallpaper: ReferenceLyric
     content.append(section);
   }
   sync(settings);
-  toggle.addEventListener("click", () => {
-    const open = panel.hidden;
+  const setOpen = (open: boolean): void => {
     panel.hidden = !open;
     toggle.setAttribute("aria-expanded", String(open));
     root.classList.toggle("is-open", open);
-  });
+  };
+  toggle.addEventListener("click", () => setOpen(panel.hidden));
   const updateSetting = (event: Event): void => {
     const input = event.target as HTMLInputElement | HTMLSelectElement;
     const key = input.dataset.setting as keyof LiquidSettings | undefined;
@@ -128,6 +133,7 @@ export function mountLiquidControls(root: HTMLElement, wallpaper: ReferenceLyric
     wallpaper.setSettings(DEFAULT_LIQUID_SETTINGS);
     sync(wallpaper.getSettings());
   });
+  return { setOpen };
 }
 
 function controlElement(control: Control, settings: LiquidSettings): HTMLLabelElement {
