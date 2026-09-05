@@ -22,6 +22,7 @@ from aiohttp import web
 from .config import ServerConfig, load_config
 from .console import console
 from .core.arbiter import Arbiter
+from .core.state import sec_to_human
 from .core.store import StateStore
 from .core.stats import Metrics
 from .lyrics.cache import LyricsCache
@@ -134,6 +135,25 @@ async def serve(cfg: ServerConfig) -> None:
 
     store.attach(on_state, on_song)
 
+    # ---- 底部实时状态行（播放中/暂停 + 平台 + 歌名 + 进度） ----
+    # 与旧版 MusicMonitor._watch_status 一致：每 0.5s 原地刷新一行，
+    # 只展示播放时间/进度，不打断上方切歌日志。
+    def _trunc(text: str, limit: int = 36) -> str:
+        return text if len(text) <= limit else text[:limit - 1] + "…"
+
+    async def _console_status_loop() -> None:
+        while True:
+            res = store.resolved
+            if res.has_song:
+                state = "播放中" if res.playing else "已暂停"
+                platform = "Apple Music" if res.source == "applemusic" else "网易云音乐"
+                console.set_status(
+                    f"{state}  {platform}  {_trunc(res.song)}  "
+                    f"{sec_to_human(res.progress)}/{sec_to_human(res.duration)}")
+            await asyncio.sleep(0.5)
+
+    status_task = asyncio.create_task(_console_status_loop())
+
     # ---- 数据源（工作线程 → 事件循环桥） ----
     def publish(name: str, snap) -> None:
         loop.call_soon_threadsafe(store.push_source, name, snap)
@@ -158,6 +178,7 @@ async def serve(cfg: ServerConfig) -> None:
 
         await asyncio.Event().wait()
     finally:
+        status_task.cancel()
         stop_all(sources)
         if runner is not None:
             await runner.cleanup()
