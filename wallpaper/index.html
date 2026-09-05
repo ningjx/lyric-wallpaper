@@ -6,23 +6,17 @@
   <title>Music Lyrics Wallpaper</title>
 </head>
 <body>
-  <!-- 场景层：包含背景与歌词，播放时淡入显示，不播放时淡出隐藏 -->
   <div id="scene">
-    <div id="bg"></div>
-    <div id="lyrics" class="lyrics" aria-hidden="true"></div>
+    <canvas id="liquid-canvas" aria-hidden="true"></canvas>
+    <main id="fallback-lyrics" aria-label="滚动歌词"></main>
   </div>
-
-  <!-- 极简连接状态层：API 不可用时提示，避免白屏 -->
   <div id="offline" class="offline" hidden>
     <div class="offline-inner">
       <div class="offline-spinner"></div>
       <div class="offline-text">Waiting for Now Playing…</div>
     </div>
   </div>
-
-  <!-- 临时偏移提示：滚轮微调歌词对齐时短暂显示当前偏移量后淡出 -->
-  <div id="offset-hint" class="offset-hint" hidden></div>
-
-  <script type="module" src="/src/main.ts"></script>
+  <aside id="liquid-controls" aria-label="液态玻璃参数" hidden></aside>
+  <script type="module" src="/src/liquid/main.ts"></script>
 </body>
 </html>

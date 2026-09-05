@@ -6,11 +6,19 @@
 
 :root { background: #07111b; color: #edf7ff; font-family: "ChillRound", "YouYuan", sans-serif; }
 * { box-sizing: border-box; }
-html, body, #liquid-canvas, #fallback-lyrics { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+html, body, #scene, #liquid-canvas, #fallback-lyrics { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+body { background: #07111b; }
+#scene { position: fixed; inset: 0; opacity: 0; transition: opacity .55s ease; }
+#scene.active { opacity: 1; }
 #liquid-canvas { display: block; }
 #fallback-lyrics { display: none; position: fixed; inset: 0; text-align: center; }
 html.fallback #liquid-canvas { display: none; }
 html.fallback #fallback-lyrics { display: block; }
+#offline { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; color: rgb(231 245 255 / .74); font: 500 15px/1.4 "ChillRound", sans-serif; }
+#offline[hidden] { display: none; }
+.offline-inner { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border: 1px solid rgb(205 240 255 / .18); border-radius: 999px; background: rgb(5 15 25 / .38); backdrop-filter: blur(12px); }
+.offline-spinner { width: 14px; height: 14px; border: 2px solid rgb(215 243 255 / .3); border-top-color: rgb(220 248 255 / .94); border-radius: 50%; animation: liquid-spin .85s linear infinite; }
+@keyframes liquid-spin { to { transform: rotate(360deg); } }
 #liquid-controls {
   position: fixed; z-index: 10; right: clamp(14px, 2vw, 34px); bottom: clamp(14px, 2vw, 28px);
   width: min(920px, calc(100vw - 28px)); color: #eff8ff; font-family: "ChillRound", "Microsoft YaHei UI", sans-serif;

@@ -27,6 +27,8 @@ export interface WallpaperSettings {
   brightness: number;
   /** 字体（CSS font-family 值） */
   fontFamily: string;
+  /** 是否显示壁纸内部的液态玻璃调参面板 */
+  showControls: boolean;
 }
 
 /** 字体选项：combo 的 value → CSS font-family 值 */
@@ -47,6 +49,7 @@ export const DEFAULT_SETTINGS: WallpaperSettings = {
   syncOffset: 0,
   brightness: 100,
   fontFamily: DEFAULT_FONT_FAMILY,
+  showControls: false,
 };
 
 type SettingsListener = (settings: WallpaperSettings) => void;
@@ -69,6 +72,7 @@ export function setupWallpaperEnvironment(onChange: SettingsListener): void {
       const syncOffset = readNumber(propertyValue(properties.syncoffset));
       const brightness = readPositiveNumber(propertyValue(properties.brightness));
       const font = propertyValue(properties.font);
+      const showControls = propertyValue(properties.showcontrols);
 
       if (fontSize !== null) current.fontSize = fontSize;
       if (lineGap !== null) current.lineGap = lineGap;
@@ -77,6 +81,8 @@ export function setupWallpaperEnvironment(onChange: SettingsListener): void {
       if (syncOffset !== null) current.syncOffset = syncOffset;
       if (brightness !== null) current.brightness = brightness;
       if (typeof font === "string" && font in FONTS) current.fontFamily = FONTS[font];
+      const visible = readBoolean(showControls);
+      if (visible !== null) current.showControls = visible;
 
       onChange({ ...current });
     },
@@ -102,4 +108,11 @@ function readNumber(value: unknown): number | null {
 function readPositiveNumber(value: unknown): number | null {
   const n = readNumber(value);
   return n !== null && n > 0 ? n : null;
+}
+
+function readBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (value === 1 || value === "1" || value === "true") return true;
+  if (value === 0 || value === "0" || value === "false") return false;
+  return null;
 }

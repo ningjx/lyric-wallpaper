@@ -51,6 +51,7 @@ export class MusicState {
     this.sse.onState = (s) => this.applySnapshot(s);
     this.sse.onStatus = (online) => this.setOnline(online);
     this.sse.start();
+    void this.calibrate();
 
     this.calibrateTimer = window.setInterval(
       () => void this.calibrate(),

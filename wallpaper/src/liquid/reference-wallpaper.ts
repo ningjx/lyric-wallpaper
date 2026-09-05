@@ -2,6 +2,7 @@ import { LiquidGlassRenderer } from "../../vendor/liquid-glass-webgl/src/compone
 import { springStepCritical } from "../../vendor/liquid-glass-webgl/src/components/liquid-glass/renderer/spring";
 import type { GlassElementConfig } from "../../vendor/liquid-glass-webgl/src/components/liquid-glass/renderer";
 import type { LyricLine } from "../lyrics/parser";
+import type { LyricsTarget } from "../player/MusicState";
 
 const FONT_RATIO = .050;
 const LYRIC_SCROLL_SETTLE_DISTANCE = .75;
@@ -37,7 +38,7 @@ export const DEFAULT_LIQUID_SETTINGS: LiquidSettings = {
   dpr: 1.5, blurTapCap: 9, blurDownsample: 2, kawaseBlur: true, blurCache: true, perElementFbo: true,
 };
 
-export class ReferenceLyricsWallpaper {
+export class ReferenceLyricsWallpaper implements LyricsTarget {
   private readonly renderer: LiquidGlassRenderer;
   private scrollY = 0;
   private velocity = 0;
@@ -48,6 +49,7 @@ export class ReferenceLyricsWallpaper {
   private width = 0;
   private height = 0;
   private disposed = false;
+  private lyrics: LyricLine[];
   private settings: LiquidSettings = { ...DEFAULT_LIQUID_SETTINGS };
   private readonly textMeasure = document.createElement("canvas").getContext("2d")!;
   private readonly glyphMeasureCanvas = document.createElement("canvas");
@@ -56,8 +58,9 @@ export class ReferenceLyricsWallpaper {
 
   constructor(
     canvas: HTMLCanvasElement,
-    private readonly lyrics: readonly LyricLine[],
+    initialLyrics: readonly LyricLine[],
   ) {
+    this.lyrics = [...initialLyrics];
     this.renderer = new LiquidGlassRenderer(canvas);
     this.renderer.dpr = Math.min(devicePixelRatio || 1, this.settings.dpr);
     this.renderer.usePerElementFbo = true;
@@ -81,6 +84,10 @@ export class ReferenceLyricsWallpaper {
 
   draw(seconds: number, active: number): void {
     if (this.disposed) return;
+    if (this.lyrics.length === 0) {
+      this.renderer.render();
+      return;
+    }
     const delta = this.lastFrame ? Math.min(.08, Math.max(0, seconds - this.lastFrame)) : .016;
     this.lastFrame = seconds;
     const rowGap = this.rowGap();
@@ -114,6 +121,23 @@ export class ReferenceLyricsWallpaper {
 
   getSettings(): LiquidSettings { return { ...this.settings }; }
 
+  getLines(): readonly LyricLine[] { return this.lyrics; }
+
+  setLines(lines: LyricLine[], fallback = ""): void {
+    this.lyrics = lines.length > 0 ? [...lines] : fallback ? [{ time: 0, text: fallback }] : [];
+    this.active = -1;
+    this.scrollY = 0;
+    this.velocity = 0;
+    this.hasPositioned = false;
+    this.rebuild(0);
+    this.renderer.markAllDirty();
+    this.renderer.requestRender();
+  }
+
+  clear(): void {
+    this.setLines([]);
+  }
+
   setSettings(patch: Partial<LiquidSettings>): void {
     const previousDpr = this.settings.dpr;
     const previousDownsample = this.settings.blurDownsample;
@@ -130,6 +154,11 @@ export class ReferenceLyricsWallpaper {
 
   private rebuild(active: number, focus = active): void {
     if (!this.width || !this.height) return;
+    if (this.lyrics.length === 0) {
+      this.renderer.setElements([]);
+      this.renderer.setContentHeight(this.height);
+      return;
+    }
     this.active = Math.max(0, Math.min(active, this.lyrics.length - 1));
     const rowGap = this.rowGap();
     const centerY = this.height / 2;

@@ -1,6 +1,11 @@
 import "./style.css";
 import { parseLrc } from "../lyrics/parser";
 import { findCurrentLine } from "../lyrics/timeline";
+import { NowPlayingApi } from "../api/nowPlaying";
+import { SyncClock } from "../player/SyncClock";
+import { MusicState } from "../player/MusicState";
+import { SceneController } from "../scene";
+import { setupWallpaperEnvironment } from "../wallpaper";
 import { ReferenceLyricsWallpaper } from "./reference-wallpaper";
 import { mountLiquidControls } from "./controls";
 
@@ -18,18 +23,19 @@ const lines = parseLrc(`[00:00.00]把城市的声音调低
 [01:01.00]直到天色渐渐明亮`);
 
 const canvas = document.querySelector<HTMLCanvasElement>("#liquid-canvas")!;
+const scene = document.querySelector<HTMLElement>("#scene")!;
 const fallback = document.querySelector<HTMLElement>("#fallback-lyrics")!;
 const controls = document.querySelector<HTMLElement>("#liquid-controls")!;
 const params = new URLSearchParams(location.search);
-// `still=1` is solely for deterministic screenshot review. This wallpaper's
-// purpose is lyric motion, so an ambient browser preference must not freeze
-// playback supplied by Wallpaper Engine.
 const still = params.get("still") === "1";
+const previewMode = still || params.get("demo") === "1";
 const requestedTime = Number(params.get("time") ?? 16.5);
 let elapsed = Number.isFinite(requestedTime) ? Math.max(0, requestedTime) : 16.5;
 let last = performance.now();
 let frame: number | null = null;
 let wallpaper: ReferenceLyricsWallpaper | null = null;
+let musicState: MusicState | null = null;
+let clock: SyncClock | null = null;
 
 function showFallback(): void {
   document.documentElement.classList.add("fallback");
@@ -47,15 +53,25 @@ function showFallback(): void {
 async function boot(): Promise<void> {
   try {
     await document.fonts.ready;
-    wallpaper = new ReferenceLyricsWallpaper(canvas, lines);
+    wallpaper = new ReferenceLyricsWallpaper(canvas, previewMode ? lines : []);
     await wallpaper.start();
     mountLiquidControls(controls, wallpaper);
+    const setControlsVisible = (visible: boolean): void => { controls.hidden = !visible; };
+    setControlsVisible(params.get("controls") === "1");
+    setupWallpaperEnvironment((settings) => setControlsVisible(settings.showControls));
+    if (previewMode) {
+      new SceneController(scene).show();
+    } else {
+      clock = new SyncClock();
+      musicState = new MusicState(new NowPlayingApi(), clock, wallpaper, new SceneController(scene));
+      musicState.start();
+    }
     const tick = (now: number): void => {
-      if (!still) elapsed += Math.min(.1, (now - last) / 1000);
+      if (previewMode && !still) elapsed += Math.min(.1, (now - last) / 1000);
       last = now;
-      const songTime = elapsed % 67;
-      wallpaper?.draw(still ? requestedTime : elapsed, findCurrentLine(lines, songTime));
-      if (!still) frame = requestAnimationFrame(tick);
+      const songTime = previewMode ? elapsed % 67 : clock?.now() ?? 0;
+      wallpaper?.draw(now / 1000, previewMode ? findCurrentLine(lines, songTime) : findCurrentLineForWallpaper(songTime));
+      frame = requestAnimationFrame(tick);
     };
     tick(last);
   } catch {
@@ -63,6 +79,10 @@ async function boot(): Promise<void> {
   }
 }
 
+function findCurrentLineForWallpaper(time: number): number {
+  return wallpaper ? findCurrentLine(wallpaper.getLines(), time) : 0;
+}
+
 void boot();
 window.addEventListener("resize", () => wallpaper?.resize());
-window.addEventListener("pagehide", () => { if (frame !== null) cancelAnimationFrame(frame); wallpaper?.dispose(); }, { once: true });
+window.addEventListener("pagehide", () => { if (frame !== null) cancelAnimationFrame(frame); musicState?.stop(); wallpaper?.dispose(); }, { once: true });
