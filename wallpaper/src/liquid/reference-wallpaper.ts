@@ -261,9 +261,14 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
       }
       this.backgroundComposer.activate(texture);
     } catch (error) {
-      // 用户删除已选择的文件或浏览器拒绝访问时，始终回退到内置图片。
+      // 部分 Wallpaper Engine Chromium 对 file:/// → Canvas 的回写有限制。
+      // 此时直接上传原图，至少保证自定义背景不会静默回退为默认图。
       if (request === this.backgroundRequest && !this.disposed && source !== WALLPAPER_SOURCE) {
-        await this.renderer.loadWallpaper(WALLPAPER_SOURCE);
+        try {
+          await this.backgroundComposer.uploadSource(this.renderer, source);
+        } catch {
+          await this.renderer.loadWallpaper(WALLPAPER_SOURCE);
+        }
       }
     }
   }
