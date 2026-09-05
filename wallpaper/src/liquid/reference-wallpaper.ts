@@ -16,9 +16,7 @@ export interface LiquidSettings {
   lyricOffsetX: number; lyricOffsetY: number; lyricAlignment: 0 | 1 | 2;
   lyricDepthMinScale: number; lyricDepthScaleFalloff: number; lyricDepthScaleCurve: number;
   lyricDepthAlphaFalloff: number; lyricDepthAlphaCurve: number; lyricDepthGlassFloor: number; lyricDepthCullDistance: number;
-  /** 当前随机到的背景文件；仅运行时使用，不作为单图属性暴露。 */
-  backgroundImage: string; backgroundDirectory: string; backgroundIntervalSeconds: number;
-  backgroundLayout: BackgroundLayout; backgroundScale: number; backgroundOffsetX: number; backgroundOffsetY: number;
+  backgroundImage: string; backgroundLayout: BackgroundLayout; backgroundScale: number; backgroundOffsetX: number; backgroundOffsetY: number;
   cornerRadius: number; refractionHeight: number; refractionAmount: number; blurRadius: number; lyricBehindGlass: boolean;
   saturation: number; brightness: number; contrast: number; depthEffect: boolean; chromaticAberration: boolean;
   tintColor: [number, number, number]; tintAlpha: number; surfaceColor: [number, number, number]; surfaceAlpha: number;
@@ -33,8 +31,7 @@ export const DEFAULT_LIQUID_SETTINGS: LiquidSettings = {
   lyricOffsetX: 0, lyricOffsetY: -115, lyricAlignment: 0,
   lyricDepthMinScale: .61, lyricDepthScaleFalloff: .55, lyricDepthScaleCurve: 1.63,
   lyricDepthAlphaFalloff: .65, lyricDepthAlphaCurve: 1.12, lyricDepthGlassFloor: .15, lyricDepthCullDistance: 1.5,
-  backgroundImage: "", backgroundDirectory: "", backgroundIntervalSeconds: 300,
-  backgroundLayout: 0, backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0,
+  backgroundImage: "", backgroundLayout: 0, backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0,
   cornerRadius: 45, refractionHeight: 4, refractionAmount: -34, blurRadius: 0, lyricBehindGlass: false,
   saturation: 1.35, brightness: 0, contrast: 1, depthEffect: true, chromaticAberration: false,
   tintColor: [.18, .52, .72], tintAlpha: 0, surfaceColor: [.80, .94, 1], surfaceAlpha: 0,
