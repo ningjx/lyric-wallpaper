@@ -42,3 +42,33 @@ export interface LyricsResponse {
   /** 逐字歌词（可空） */
   karaokeLyric: string;
 }
+
+/**
+ * SSE 推送到、以及前端统一使用的「精简播放器快照」。
+ *
+ * 后端 /sse 推的 state 就是此结构（字段名一致）。/query 的 NowPlayingState
+ * 会被归一化到这里（见 nowPlaying.ts 的 toSnapshot）。
+ *
+ * 注意：切歌事件发出瞬间 trackId/album/cover/hasLyric 可能尚未就绪
+ * （搜索未返回）；等 resolveState 变为 ok/degraded 的事件到达时才完整。
+ */
+export interface PlayerSnapshot {
+  hasSong: boolean;
+  song: string;
+  author: string;
+  playing: boolean;
+  progress: number;
+  duration: number;
+  /** 歌词解析状态：resolving / ok / degraded / from-cache / idle */
+  resolveState: string;
+  trackId: string;
+  album: string;
+  cover: string;
+  hasLyric: boolean;
+}
+
+/** SSE 事件帧（data: 行解出的 JSON） */
+export interface SseEvent {
+  type: "snapshot" | "state" | "song" | "ping";
+  state?: PlayerSnapshot;
+}
