@@ -65,7 +65,7 @@ const groups: Array<{ title: string; controls: Control[] }> = [
     { key: "shadowOffsetY", label: "垂直偏移", kind: "range", min: -50, max: 80, step: 1 },
   ] },
   { title: "渲染器", controls: [
-    { key: "separableBlur", label: "可分离模糊", kind: "checkbox" },
+    { key: "separableBlur", label: "高质量全场模糊", kind: "checkbox" },
     { key: "continuousCorners", label: "连续曲率圆角", kind: "checkbox" },
     { key: "directBackdrop", label: "直接采样背景", kind: "checkbox" },
     { key: "dpr", label: "渲染像素比", kind: "range", min: .75, max: 2, step: .05 },

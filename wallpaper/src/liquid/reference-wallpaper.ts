@@ -28,14 +28,14 @@ export const DEFAULT_LIQUID_SETTINGS: LiquidSettings = {
   lyricFontScale: .77, lyricGlassPadding: 20, lyricGap: 120, lyricVerticalOffset: 0, lyricScrollSpeed: 5.5,
   lyricOffsetX: 0, lyricOffsetY: 0, lyricAlignment: 0,
   lyricDepthMinScale: .58, lyricDepthScaleFalloff: .55, lyricDepthScaleCurve: 1.7,
-  lyricDepthAlphaFalloff: .65, lyricDepthAlphaCurve: 1.35, lyricDepthGlassFloor: .15, lyricDepthCullDistance: 3.5,
+  lyricDepthAlphaFalloff: .65, lyricDepthAlphaCurve: 1.35, lyricDepthGlassFloor: .15, lyricDepthCullDistance: 1.5,
   cornerRadius: 29, refractionHeight: 22, refractionAmount: -34, blurRadius: 2,
-  saturation: 1.42, brightness: 0, contrast: 1, depthEffect: true, chromaticAberration: true,
+  saturation: 1.42, brightness: 0, contrast: 1, depthEffect: true, chromaticAberration: false,
   tintColor: [.18, .52, .72], tintAlpha: .03, surfaceColor: [.80, .94, 1], surfaceAlpha: .04,
   highlight: true, highlightMode: 0, highlightColor: [.72, .92, 1], highlightAlpha: .34, highlightAngle: -1.05, highlightFalloff: 2.1, highlightWidth: 1,
   shadow: true, shadowColor: [.01, .06, .12], shadowAlpha: .18, shadowRadius: 28, shadowOffsetX: 0, shadowOffsetY: 16,
-  separableBlur: true, continuousCorners: true, directBackdrop: true,
-  dpr: 1.5, blurTapCap: 9, blurDownsample: 2, kawaseBlur: true, blurCache: true, perElementFbo: true,
+  separableBlur: false, continuousCorners: true, directBackdrop: true,
+  dpr: .75, blurTapCap: 9, blurDownsample: 2, kawaseBlur: true, blurCache: true, perElementFbo: true,
 };
 
 export class ReferenceLyricsWallpaper implements LyricsTarget {
@@ -163,7 +163,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     const rowGap = this.rowGap();
     const centerY = this.height / 2;
     const rows: GlassElementConfig[] = [];
-    const renderWindow = Math.ceil(this.settings.lyricDepthCullDistance) + 1;
+    const renderWindow = Math.ceil(this.settings.lyricDepthCullDistance);
     const first = Math.max(0, Math.floor(focus - renderWindow));
     const last = Math.min(this.lyrics.length - 1, Math.ceil(focus + renderWindow));
     for (let index = first; index <= last; index++) {
@@ -310,6 +310,10 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
       // path; the independent wallpaper cache only works for fixed elements.
       independentBackdrop: false,
       directBackdropSample: false,
+      // The inline wallpaper path is bounded to this card's pixels and keeps
+      // scroll coordinates exact. The optional high-quality setting switches
+      // back to the renderer's full-scene separable blur.
+      sampleWallpaper: !this.settings.separableBlur,
       useSeparableBlur: this.settings.separableBlur,
       useContinuousSdf: this.settings.continuousCorners,
       scroll: true,
