@@ -13,7 +13,7 @@ export default defineConfig({
     emptyOutDir: true,
     assetsInlineLimit: 0,
     rollupOptions: {
-      input: { wallpaper: "index.html", glass: "glass.html" },
+      input: { wallpaper: "index.html" },
     },
     minify: "esbuild",
     sourcemap: false,

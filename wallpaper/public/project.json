@@ -6,7 +6,7 @@
       "showcontrols": {
         "order": 1,
         "text": "显示壁纸调参",
-        "type": "checkbox",
+        "type": "bool",
         "value": false
       }
     },
