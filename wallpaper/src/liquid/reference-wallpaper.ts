@@ -260,28 +260,26 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
         return;
       }
       this.backgroundComposer.activate(texture);
-    } catch {
-      // 用户删除已选择的文件或浏览器拒绝访问时，始终回退到内置图片。
+    } catch (error) {
+      // 部分 Wallpaper Engine Chromium 对 file:/// → Canvas 的回写有限制。
+      // 此时直接上传原图，至少保证自定义背景不会静默回退为默认图。
       if (request === this.backgroundRequest && !this.disposed && source !== WALLPAPER_SOURCE) {
-        await this.renderer.loadWallpaper(WALLPAPER_SOURCE);
+        try {
+          await this.backgroundComposer.uploadSource(this.renderer, source);
+        } catch {
+          await this.renderer.loadWallpaper(WALLPAPER_SOURCE);
+        }
       }
     }
   }
 
   private backgroundSource(value: string): string {
     if (!value) return WALLPAPER_SOURCE;
-    let path = value.trim();
-    // 扩展长度 UNC：\\?\UNC\nas\share\image.jpg → \\nas\share\image.jpg
-    if (/^\\\\[?.]\\UNC\\/i.test(path)) path = `\\\\${path.slice(8)}`;
-    const normalized = path.replace(/\\/g, "/");
-    // SMB 的 UNC 路径必须把服务器名放在 file URL 的 host 位：
-    // \\nas\share\image.jpg → file://nas/share/image.jpg。
-    if (/^\/\/[^/]+\/[^/]+/.test(normalized)) return `file:${encodeURI(normalized)}`;
     // Windows 盘符（C:\\...）不能被当作 URL scheme；Wallpaper Engine 的
     // file 属性正是以这种本地路径形式返回值。
-    if (/^[a-z]:[\\/]/i.test(path)) return `file:///${encodeURI(normalized)}`;
-    if (/^[a-z][a-z0-9+.-]*:/i.test(path)) return path;
-    return `file:///${encodeURI(normalized)}`;
+    if (/^[a-z]:[\\/]/i.test(value)) return `file:///${value.replace(/\\/g, "/")}`;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return value;
+    return `file:///${value.replace(/\\/g, "/")}`;
   }
 
   private rowGap(): number {
