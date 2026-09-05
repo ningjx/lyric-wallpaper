@@ -26,6 +26,7 @@ RESET = "\x1b[0m"
 BOLD = "\x1b[1m"
 DIM = "\x1b[2m"
 GRAY = "\x1b[90m"
+WHITE = "\x1b[97m"
 RED = "\x1b[91m"
 GREEN = "\x1b[92m"
 YELLOW = "\x1b[93m"
@@ -111,7 +112,7 @@ class Console:
         if tag is not None:
             tag_color = GREEN if tag == "[词]" else (YELLOW if tag == "[··]" else GRAY)
             seg.append(self._paint(tag, BOLD, tag_color))
-        seg.append(self._paint(song, GRAY))
+        seg.append(self._paint(song, WHITE))
         seg.append(self._paint(progress, CYAN))
         return "  ".join(seg)
 
