@@ -20,8 +20,8 @@ html.fallback #fallback-lyrics { display: block; }
 .offline-spinner { width: 14px; height: 14px; border: 2px solid rgb(215 243 255 / .3); border-top-color: rgb(220 248 255 / .94); border-radius: 50%; animation: liquid-spin .85s linear infinite; }
 @keyframes liquid-spin { to { transform: rotate(360deg); } }
 #liquid-controls {
-  position: fixed; z-index: 10; right: clamp(14px, 2vw, 34px); bottom: clamp(14px, 2vw, 28px);
-  width: min(920px, calc(100vw - 28px)); color: #eff8ff; font-family: "ChillRound", "Microsoft YaHei UI", sans-serif;
+  position: fixed; z-index: 10; right: 24px; bottom: 24px;
+  width: calc(100% - 48px); max-width: 920px; color: #eff8ff; font-family: "ChillRound", "Microsoft YaHei UI", sans-serif;
 }
 .liquid-controls-toggle, .liquid-controls-title button {
   appearance: none; border: 1px solid rgb(205 240 255 / .42); color: inherit; cursor: pointer;
@@ -54,7 +54,7 @@ html.fallback #fallback-lyrics { display: block; }
 .liquid-control select { min-width: 80px; justify-self: end; border: 1px solid rgb(255 255 255 / .18); border-radius: 7px; color: inherit; background: rgb(7 16 28 / .8); font: inherit; padding: 3px 5px; }
 .liquid-control-checkbox, .liquid-control-color, .liquid-control-select { grid-template-columns: 1fr auto; }
 @media (max-width: 760px) {
-  #liquid-controls { right: 10px; bottom: 10px; width: calc(100vw - 20px); }
+  #liquid-controls { right: 12px; bottom: 12px; width: calc(100% - 24px); }
   .liquid-controls-panel { padding: 12px; border-radius: 18px; max-height: 52vh; }
   .liquid-controls-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .liquid-controls-group { padding: 8px; }
