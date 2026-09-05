@@ -59,6 +59,8 @@ export class LyricsRenderer implements LyricsTarget {
   private gap = DEFAULT_GAP;
   /** 歌词同步偏移（毫秒），正数提前、负数延后，由属性面板调节 */
   private syncOffset = 0;
+  /** 临时偏移（毫秒），仅对当前歌曲生效，切歌即清零；在面板偏移之上叠加 */
+  private tempOffset = 0;
 
   constructor(container: HTMLElement) {
     for (let i = 0; i < WINDOW; i++) {
@@ -99,10 +101,11 @@ export class LyricsRenderer implements LyricsTarget {
     this.showFallback("");
   }
 
-  /** 每帧调用：按当前播放时间（含同步偏移）推进当前行 */
+  /** 每帧调用：按当前播放时间（含面板偏移 + 临时偏移）推进当前行 */
   update(time: number): void {
     if (this.lines.length === 0) return;
-    const next = findCurrentLine(this.lines, time + this.syncOffset / 1000);
+    const next = findCurrentLine(
+      this.lines, time + (this.syncOffset + this.tempOffset) / 1000);
     if (next !== this.cur) {
       this.advance(next);
     }
@@ -123,6 +126,27 @@ export class LyricsRenderer implements LyricsTarget {
   /** 设置歌词同步偏移（毫秒），正数提前、负数延后 */
   setSyncOffset(ms: number): void {
     this.syncOffset = ms;
+  }
+
+  /** 微调「当前歌」临时偏移（毫秒），返回累积后的临时偏移值 */
+  nudgeTempOffset(deltaMs: number): number {
+    this.tempOffset += deltaMs;
+    return this.tempOffset;
+  }
+
+  /** 直接设置「当前歌」临时偏移（毫秒），拖拽歌词时按触点绝对定位 */
+  setTempOffset(ms: number): void {
+    this.tempOffset = Math.round(ms);
+  }
+
+  /** 当前歌临时偏移（毫秒，仅当前歌有效） */
+  get tempOffsetMs(): number {
+    return this.tempOffset;
+  }
+
+  /** 清零临时偏移（切歌时调用，回到面板全局偏移） */
+  clearTempOffset(): void {
+    this.tempOffset = 0;
   }
 
   private resetPool(): void {

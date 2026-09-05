@@ -13,6 +13,8 @@ export interface LyricsTarget {
   setLines(lines: LyricLine[], fallback?: string): void;
   /** 清空歌词（未播放/无歌曲） */
   clear(): void;
+  /** 切歌时清空「当前歌」临时偏移（可选，仅需临时偏移功能的渲染层实现） */
+  clearTempOffset?(): void;
 }
 
 /**
@@ -88,6 +90,8 @@ export class MusicState {
     const key = `${s.song}|${s.author}`;
     if (key !== this.songKey) {
       this.songKey = key;
+      // 切歌 → 清空上一首的临时偏移（仅当前歌有效）
+      this.target.clearTempOffset?.();
       // 歌词加载完成后才淡入场景层，避免"背景已显示、歌词还空白"的闪烁
       void this.loadLyrics(s.song, s.author);
     } else {

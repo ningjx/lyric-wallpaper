@@ -174,3 +174,26 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* ============ 临时偏移提示（滚轮微调歌词对齐时短暂显示） ============ */
+.offset-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 8%;
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: rgba(20, 20, 30, 0.72);
+  backdrop-filter: blur(6px);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  z-index: 11;
+}
+
+.offset-hint.show {
+  opacity: 1;
+}
