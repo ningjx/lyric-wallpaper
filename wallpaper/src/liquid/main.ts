@@ -28,7 +28,7 @@ const still = params.get("still") === "1";
 const requestedTime = Number(params.get("time") ?? 16.5);
 let elapsed = Number.isFinite(requestedTime) ? Math.max(0, requestedTime) : 16.5;
 let last = performance.now();
-let timer: number | null = null;
+let frame: number | null = null;
 let wallpaper: ReferenceLyricsWallpaper | null = null;
 
 function showFallback(): void {
@@ -55,9 +55,9 @@ async function boot(): Promise<void> {
       last = now;
       const songTime = elapsed % 67;
       wallpaper?.draw(still ? requestedTime : elapsed, findCurrentLine(lines, songTime));
+      if (!still) frame = requestAnimationFrame(tick);
     };
     tick(last);
-    if (!still) timer = window.setInterval(() => tick(performance.now()), 1000 / 30);
   } catch {
     showFallback();
   }
@@ -65,4 +65,4 @@ async function boot(): Promise<void> {
 
 void boot();
 window.addEventListener("resize", () => wallpaper?.resize());
-window.addEventListener("pagehide", () => { if (timer !== null) clearInterval(timer); wallpaper?.dispose(); }, { once: true });
+window.addEventListener("pagehide", () => { if (frame !== null) cancelAnimationFrame(frame); wallpaper?.dispose(); }, { once: true });

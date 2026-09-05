@@ -5,12 +5,11 @@ import type { LyricLine } from "../lyrics/parser";
 
 const FONT_RATIO = .050;
 const ROW_WINDOW = 4;
-const LYRIC_SPRING = 15;
 const WALLPAPER_SOURCE = `${import.meta.env.BASE_URL}backgrounds/wallhaven-vpolwm.jpg`;
 const RENDERER_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
 export interface LiquidSettings {
-  lyricFontScale: number; lyricGap: number; lyricVerticalOffset: number;
+  lyricFontScale: number; lyricGap: number; lyricVerticalOffset: number; lyricScrollSpeed: number;
   cornerRadius: number; refractionHeight: number; refractionAmount: number; blurRadius: number;
   saturation: number; brightness: number; contrast: number; depthEffect: boolean; chromaticAberration: boolean;
   tintColor: [number, number, number]; tintAlpha: number; surfaceColor: [number, number, number]; surfaceAlpha: number;
@@ -21,7 +20,7 @@ export interface LiquidSettings {
 }
 
 export const DEFAULT_LIQUID_SETTINGS: LiquidSettings = {
-  lyricFontScale: .77, lyricGap: 120, lyricVerticalOffset: 0,
+  lyricFontScale: .77, lyricGap: 120, lyricVerticalOffset: 0, lyricScrollSpeed: 5.5,
   cornerRadius: 29, refractionHeight: 22, refractionAmount: -34, blurRadius: 2,
   saturation: 1.42, brightness: 0, contrast: 1, depthEffect: true, chromaticAberration: true,
   tintColor: [.18, .52, .72], tintAlpha: .03, surfaceColor: [.80, .94, 1], surfaceAlpha: .04,
@@ -83,7 +82,7 @@ export class ReferenceLyricsWallpaper {
       this.velocity = 0;
       this.hasPositioned = true;
     } else {
-      const next = springStepCritical(this.scrollY, this.velocity, target, delta, LYRIC_SPRING);
+      const next = springStepCritical(this.scrollY, this.velocity, target, delta, this.settings.lyricScrollSpeed);
       this.scrollY = Math.abs(next.current - target) < .1 && Math.abs(next.velocity) < .1 ? target : next.current;
       this.velocity = next.velocity;
     }
