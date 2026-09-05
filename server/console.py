@@ -90,19 +90,30 @@ class Console:
         return text
 
     def _style_status(self, text: str) -> str:
-        """为“状态 / 平台 / 歌名 / 进度”四段式状态栏分别着色。"""
+        """为“状态 / 平台 / 歌词标注 / 歌名 / 进度”状态栏分别着色。
+
+        兼容两种段数：4 段（无歌词标注）与 5 段（含 [词]/[··]/[无] 标注）。
+        """
         parts = text.split("  ")
-        if len(parts) != 4:
+        if len(parts) == 4:
+            state, platform, song, progress = parts
+            tag = None
+        elif len(parts) == 5:
+            state, platform, tag, song, progress = parts
+        else:
             return text
-        state, platform, song, progress = parts
         state_color = GREEN if state == "播放中" else YELLOW
         platform_color = APPLE_PINK if platform == "Apple Music" else NETEASE_RED
-        return "  ".join((
+        seg = [
             self._paint(state, BOLD, state_color),
             self._paint(platform, BOLD, platform_color),
-            self._paint(song, GRAY),
-            self._paint(progress, CYAN),
-        ))
+        ]
+        if tag is not None:
+            tag_color = GREEN if tag == "[词]" else (YELLOW if tag == "[··]" else GRAY)
+            seg.append(self._paint(tag, BOLD, tag_color))
+        seg.append(self._paint(song, GRAY))
+        seg.append(self._paint(progress, CYAN))
+        return "  ".join(seg)
 
     def _clear_line(self):
         # 回到行首并清到行尾（覆盖旧状态行，避免残留字符）

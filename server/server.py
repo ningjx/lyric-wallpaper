@@ -147,8 +147,17 @@ async def serve(cfg: ServerConfig) -> None:
             if res.has_song:
                 state = "播放中" if res.playing else "已暂停"
                 platform = "Apple Music" if res.source == "applemusic" else "网易云音乐"
+                # 歌词获取标注：[词] 已有 / [··] 解析中 / [无] 未获取到
+                ctx = store.track_context
+                if (ctx is None or ctx.song_key != (res.song, res.author)
+                        or ctx.resolve_state == "resolving"):
+                    tag = "[··]"
+                elif getattr(ctx.lyric_result, "has_lyric", False):
+                    tag = "[词]"
+                else:
+                    tag = "[无]"
                 console.set_status(
-                    f"{state}  {platform}  {_trunc(res.song)}  "
+                    f"{state}  {platform}  {tag}  {_trunc(res.song)}  "
                     f"{sec_to_human(res.progress)}/{sec_to_human(res.duration)}")
             await asyncio.sleep(0.5)
 
