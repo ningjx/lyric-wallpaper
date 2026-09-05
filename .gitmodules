@@ -1,0 +1,3 @@
+[submodule "wallpaper/vendor/liquid-glass-webgl"]
+	path = wallpaper/vendor/liquid-glass-webgl
+	url = https://github.com/martin65536/liquid-glass-webgl.git

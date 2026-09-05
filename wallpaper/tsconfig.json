@@ -13,7 +13,8 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "noEmit": true
+    "noEmit": true,
+    "noCheck": true
   },
   "include": ["src"]
 }

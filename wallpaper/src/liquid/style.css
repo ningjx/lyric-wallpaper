@@ -1,0 +1,62 @@
+@font-face {
+  font-family: "ChillRound";
+  src: url("/fonts/ChillRoundF.ttf") format("truetype");
+  font-display: block;
+}
+
+:root { background: #07111b; color: #edf7ff; font-family: "ChillRound", "YouYuan", sans-serif; }
+* { box-sizing: border-box; }
+html, body, #liquid-canvas, #fallback-lyrics { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+#liquid-canvas { display: block; }
+#fallback-lyrics { display: none; position: fixed; inset: 0; text-align: center; }
+html.fallback #liquid-canvas { display: none; }
+html.fallback #fallback-lyrics { display: block; }
+#liquid-controls {
+  position: fixed; z-index: 10; right: clamp(14px, 2vw, 34px); bottom: clamp(14px, 2vw, 28px);
+  width: min(920px, calc(100vw - 28px)); color: #eff8ff; font-family: "ChillRound", "Microsoft YaHei UI", sans-serif;
+}
+.liquid-controls-toggle, .liquid-controls-title button {
+  appearance: none; border: 1px solid rgb(205 240 255 / .42); color: inherit; cursor: pointer;
+  background: rgb(15 31 48 / .58); backdrop-filter: blur(20px) saturate(1.35);
+  box-shadow: inset 0 1px rgb(255 255 255 / .22), 0 12px 30px rgb(0 0 0 / .24);
+}
+.liquid-controls-toggle {
+  display: flex; align-items: center; gap: 12px; margin-left: auto; padding: 10px 15px; border-radius: 999px;
+  font: 600 14px/1 "ChillRound", "Microsoft YaHei UI", sans-serif;
+}
+.liquid-controls-toggle span { font-size: 18px; line-height: .6; transform: rotate(180deg); transition: transform .2s ease; }
+#liquid-controls.is-open .liquid-controls-toggle span { transform: rotate(0); }
+.liquid-controls-panel {
+  max-height: min(58vh, 590px); overflow: auto; margin-bottom: 10px; padding: 16px;
+  border: 1px solid rgb(208 241 255 / .36); border-radius: 24px; background: rgb(11 24 39 / .72);
+  backdrop-filter: blur(28px) saturate(1.35); box-shadow: inset 0 1px rgb(255 255 255 / .2), 0 18px 60px rgb(0 0 0 / .34);
+}
+.liquid-controls-title { display: flex; justify-content: space-between; align-items: center; margin: 0 2px 14px; }
+.liquid-controls-title strong { font-size: 16px; letter-spacing: .04em; }
+.liquid-controls-title button { padding: 7px 10px; border-radius: 10px; font: 600 12px/1 inherit; }
+.liquid-controls-groups { display: grid; grid-template-columns: repeat(3, minmax(200px, 1fr)); gap: 12px; }
+.liquid-controls-group { padding: 11px; border: 1px solid rgb(224 245 255 / .13); border-radius: 14px; background: rgb(255 255 255 / .045); }
+.liquid-controls-group h2 { margin: 0 0 9px; color: rgb(224 245 255 / .84); font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+.liquid-control { display: grid; grid-template-columns: minmax(72px, 1fr) minmax(70px, 1.3fr) auto; align-items: center; gap: 7px; min-height: 29px; font-size: 11px; }
+.liquid-control > span { color: rgb(226 239 248 / .82); white-space: nowrap; }
+.liquid-control output { min-width: 28px; color: rgb(255 255 255 / .78); font-variant-numeric: tabular-nums; text-align: right; }
+.liquid-control input[type="range"] { width: 100%; accent-color: #a5e9ff; }
+.liquid-control input[type="checkbox"] { justify-self: end; width: 15px; height: 15px; accent-color: #a5e9ff; }
+.liquid-control input[type="color"] { justify-self: end; width: 30px; height: 20px; padding: 1px; border: 1px solid rgb(255 255 255 / .24); border-radius: 6px; background: transparent; }
+.liquid-control select { min-width: 80px; justify-self: end; border: 1px solid rgb(255 255 255 / .18); border-radius: 7px; color: inherit; background: rgb(7 16 28 / .8); font: inherit; padding: 3px 5px; }
+.liquid-control-checkbox, .liquid-control-color, .liquid-control-select { grid-template-columns: 1fr auto; }
+@media (max-width: 760px) {
+  #liquid-controls { right: 10px; bottom: 10px; width: calc(100vw - 20px); }
+  .liquid-controls-panel { padding: 12px; border-radius: 18px; max-height: 52vh; }
+  .liquid-controls-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .liquid-controls-group { padding: 8px; }
+  .liquid-control { grid-template-columns: minmax(56px, 1fr) minmax(54px, 1fr) auto; gap: 5px; font-size: 10px; }
+}
+@media (max-width: 460px) { .liquid-controls-groups { grid-template-columns: 1fr; } }
+.fallback-line {
+  position: absolute; left: 50%; top: 50%; width: 92%;
+  font-size: clamp(38px, 5.8vw, 118px); font-weight: 600; letter-spacing: .045em;
+  transform: translate(-50%, calc(-50% + var(--y))) scale(var(--scale)); opacity: var(--opacity);
+  transition: transform 1.1s cubic-bezier(.22, 1, .36, 1), opacity 900ms ease;
+}
+.fallback-line.current { color: #eafaff; text-shadow: 0 0 30px #b9e6ff88; }
