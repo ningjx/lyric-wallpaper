@@ -77,7 +77,13 @@ async function boot(): Promise<void> {
       const songTime = previewMode
         ? elapsed % 67
         : (clock?.now() ?? 0) + wallpaperSettings.lyricLeadMs / 1000;
-      wallpaper?.draw(now / 1000, previewMode ? findCurrentLine(lines, songTime) : findCurrentLineForWallpaper(songTime));
+      const scrollLead = wallpaper?.getScrollLeadSeconds() ?? 0;
+      wallpaper?.draw(
+        now / 1000,
+        previewMode
+          ? findCurrentLine(lines, songTime + scrollLead)
+          : findCurrentLineForWallpaper(songTime + scrollLead),
+      );
       frame = requestAnimationFrame(tick);
     };
     tick(last);

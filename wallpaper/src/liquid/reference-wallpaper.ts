@@ -15,7 +15,7 @@ export interface LiquidSettings {
   lyricOffsetX: number; lyricOffsetY: number; lyricAlignment: 0 | 1 | 2;
   lyricDepthMinScale: number; lyricDepthScaleFalloff: number; lyricDepthScaleCurve: number;
   lyricDepthAlphaFalloff: number; lyricDepthAlphaCurve: number; lyricDepthGlassFloor: number; lyricDepthCullDistance: number;
-  cornerRadius: number; refractionHeight: number; refractionAmount: number; blurRadius: number;
+  cornerRadius: number; refractionHeight: number; refractionAmount: number; blurRadius: number; lyricBehindGlass: boolean;
   saturation: number; brightness: number; contrast: number; depthEffect: boolean; chromaticAberration: boolean;
   tintColor: [number, number, number]; tintAlpha: number; surfaceColor: [number, number, number]; surfaceAlpha: number;
   highlight: boolean; highlightMode: 0 | 1 | 2; highlightColor: [number, number, number]; highlightAlpha: number; highlightAngle: number; highlightFalloff: number; highlightWidth: number;
@@ -29,7 +29,7 @@ export const DEFAULT_LIQUID_SETTINGS: LiquidSettings = {
   lyricOffsetX: 0, lyricOffsetY: -115, lyricAlignment: 0,
   lyricDepthMinScale: .61, lyricDepthScaleFalloff: .55, lyricDepthScaleCurve: 1.63,
   lyricDepthAlphaFalloff: .65, lyricDepthAlphaCurve: 1.12, lyricDepthGlassFloor: .15, lyricDepthCullDistance: 1.5,
-  cornerRadius: 45, refractionHeight: 4, refractionAmount: -34, blurRadius: 0,
+  cornerRadius: 45, refractionHeight: 4, refractionAmount: -34, blurRadius: 0, lyricBehindGlass: false,
   saturation: 1.35, brightness: 0, contrast: 1, depthEffect: true, chromaticAberration: false,
   tintColor: [.18, .52, .72], tintAlpha: 0, surfaceColor: [.80, .94, 1], surfaceAlpha: 0,
   highlight: true, highlightMode: 0, highlightColor: [.72, .92, 1], highlightAlpha: .34, highlightAngle: -1.98, highlightFalloff: 2.1, highlightWidth: 1,
@@ -121,6 +121,27 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
 
   getSettings(): LiquidSettings { return { ...this.settings }; }
 
+  /**
+   * 将当前行的视觉焦点提前切换，使临界阻尼滚动在歌词时间点到来前收敛。
+   * 误差阈值与 draw() 的实际停靠阈值保持一致，避免使用固定的猜测时长。
+   */
+  getScrollLeadSeconds(): number {
+    const rowGap = this.rowGap();
+    const omega = Math.max(2, this.settings.lyricScrollSpeed);
+    let normalizedTime = 0;
+    while (
+      normalizedTime < 12 &&
+      (
+        rowGap * Math.exp(-normalizedTime) * (1 + normalizedTime) > LYRIC_SCROLL_SETTLE_DISTANCE ||
+        rowGap * omega * normalizedTime * Math.exp(-normalizedTime) > LYRIC_SCROLL_SETTLE_VELOCITY
+      )
+    ) {
+      normalizedTime += .05;
+    }
+    const duration = normalizedTime / omega;
+    return Math.min(2.5, Math.max(.2, duration + .03));
+  }
+
   getLines(): readonly LyricLine[] { return this.lyrics; }
 
   setLines(lines: LyricLine[], fallback = ""): void {
@@ -177,9 +198,8 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
       const glassStrength = this.depthGlassStrength(alpha);
       const typography = this.fitTypography(this.lyrics[index].text, 700, scale);
       const rect = this.lyricRect(index, centerY, rowGap, typography);
-      rows.push(this.glassRow(index, rect, glassStrength));
       const textRect = { ...rect, y: rect.y + typography.opticalOffset + this.settings.lyricVerticalOffset };
-      rows.push({
+      const textRow: GlassElementConfig = {
         ...this.base(`lyric-${index}`, "text", textRect),
         scroll: true,
         text: {
@@ -190,7 +210,12 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
           align: "center",
           halo: "dark",
         },
-      });
+      };
+      const glassRow = this.glassRow(index, rect, glassStrength);
+      // 背面模式先绘制文字，再让玻璃从场景纹理采样：文字因此参与折射。
+      // 玻璃卡片会禁用模糊，避免把印在背面的字也模糊掉。
+      if (this.settings.lyricBehindGlass) rows.push(textRow, glassRow);
+      else rows.push(glassRow, textRow);
     }
     this.renderer.setElements(rows);
     this.renderer.setContentHeight(this.height + Math.max(0, this.lyrics.length - 1) * rowGap);
@@ -295,6 +320,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   }
 
   private glassRow(index: number, rect: { x: number; y: number; w: number; h: number }, strength: number): GlassElementConfig {
+    const lyricBehindGlass = this.settings.lyricBehindGlass;
     return {
       ...this.base(`lyric-glass-${index}`, "glass-shape", rect),
       cornerRadius: Math.min(this.settings.cornerRadius, rect.h * .45),
@@ -302,7 +328,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
       refractionAmount: this.settings.refractionAmount * strength,
       depthEffect: this.settings.depthEffect,
       chromaticAberration: this.settings.chromaticAberration,
-      blurRadius: this.settings.blurRadius * strength,
+      blurRadius: lyricBehindGlass ? 0 : this.settings.blurRadius * strength,
       saturation: this.settings.saturation,
       brightness: this.settings.brightness,
       contrast: this.settings.contrast,
@@ -312,13 +338,13 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
       outerShadow: this.settings.shadow ? { radius: this.settings.shadowRadius, alpha: this.settings.shadowAlpha * strength, offsetX: this.settings.shadowOffsetX, offsetY: this.settings.shadowOffsetY, color: this.settings.shadowColor } : null,
       // 高质量模糊以原始壁纸为统一背板：上游渲染器会缓存同半径的全场
       // 高斯结果，滚动时也不会被场景模糊的每帧限流回退为清晰纹理。
-      independentBackdrop: this.settings.separableBlur,
+      independentBackdrop: this.settings.separableBlur && !lyricBehindGlass,
       directBackdropSample: false,
       // The inline wallpaper path is bounded to this card's pixels and keeps
       // scroll coordinates exact. The optional high-quality setting switches
       // back to the renderer's full-scene separable blur.
-      sampleWallpaper: !this.settings.separableBlur,
-      useSeparableBlur: this.settings.separableBlur,
+      sampleWallpaper: !this.settings.separableBlur && !lyricBehindGlass,
+      useSeparableBlur: this.settings.separableBlur && !lyricBehindGlass,
       useContinuousSdf: this.settings.continuousCorners,
       scroll: true,
     };

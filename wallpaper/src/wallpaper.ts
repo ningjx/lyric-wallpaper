@@ -153,6 +153,7 @@ const NUMBER_PROPERTIES: Record<string, keyof LiquidSettings> = {
 
 const BOOLEAN_PROPERTIES: Record<string, keyof LiquidSettings> = {
   deptheffect: "depthEffect", chromaticaberration: "chromaticAberration", highlight: "highlight", shadow: "shadow",
+  lyricbehindglass: "lyricBehindGlass",
   separableblur: "separableBlur", continuouscorners: "continuousCorners", directbackdrop: "directBackdrop",
   kawaseblur: "kawaseBlur", blurcache: "blurCache", perelementfbo: "perElementFbo",
 };
