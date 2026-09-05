@@ -267,8 +267,11 @@ export class ReferenceLyricsWallpaper {
       tintColor: [...this.settings.tintColor, this.settings.tintAlpha * strength],
       highlight: this.settings.highlight ? { mode: this.settings.highlightMode, color: this.settings.highlightColor, angle: this.settings.highlightAngle, falloff: this.settings.highlightFalloff, alpha: this.settings.highlightAlpha * strength, widthDp: this.settings.highlightWidth } : null,
       outerShadow: this.settings.shadow ? { radius: this.settings.shadowRadius, alpha: this.settings.shadowAlpha * strength, offsetX: this.settings.shadowOffsetX, offsetY: this.settings.shadowOffsetY, color: this.settings.shadowColor } : null,
-      independentBackdrop: true,
-      directBackdropSample: this.settings.directBackdrop,
+      // Scroll changes the card's screen position every frame. Sampling the
+      // isolated scene preserves that position through the renderer's blur
+      // path; the independent wallpaper cache only works for fixed elements.
+      independentBackdrop: false,
+      directBackdropSample: false,
       useSeparableBlur: this.settings.separableBlur,
       useContinuousSdf: this.settings.continuousCorners,
       scroll: true,
