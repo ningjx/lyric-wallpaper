@@ -4,13 +4,14 @@ import type { GlassElementConfig } from "../../vendor/liquid-glass-webgl/src/com
 import type { LyricLine } from "../lyrics/parser";
 
 const FONT_RATIO = .050;
-const ROW_WINDOW = 4;
 const WALLPAPER_SOURCE = `${import.meta.env.BASE_URL}backgrounds/wallhaven-vpolwm.jpg`;
 const RENDERER_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
 export interface LiquidSettings {
   lyricFontScale: number; lyricGap: number; lyricVerticalOffset: number; lyricScrollSpeed: number;
   lyricOffsetX: number; lyricOffsetY: number; lyricAlignment: 0 | 1 | 2;
+  lyricDepthMinScale: number; lyricDepthScaleFalloff: number; lyricDepthScaleCurve: number;
+  lyricDepthAlphaFalloff: number; lyricDepthAlphaCurve: number; lyricDepthGlassFloor: number; lyricDepthCullDistance: number;
   cornerRadius: number; refractionHeight: number; refractionAmount: number; blurRadius: number;
   saturation: number; brightness: number; contrast: number; depthEffect: boolean; chromaticAberration: boolean;
   tintColor: [number, number, number]; tintAlpha: number; surfaceColor: [number, number, number]; surfaceAlpha: number;
@@ -23,6 +24,8 @@ export interface LiquidSettings {
 export const DEFAULT_LIQUID_SETTINGS: LiquidSettings = {
   lyricFontScale: .77, lyricGap: 120, lyricVerticalOffset: 0, lyricScrollSpeed: 5.5,
   lyricOffsetX: 0, lyricOffsetY: 0, lyricAlignment: 0,
+  lyricDepthMinScale: .58, lyricDepthScaleFalloff: .55, lyricDepthScaleCurve: 1.7,
+  lyricDepthAlphaFalloff: .65, lyricDepthAlphaCurve: 1.35, lyricDepthGlassFloor: .15, lyricDepthCullDistance: 3.5,
   cornerRadius: 29, refractionHeight: 22, refractionAmount: -34, blurRadius: 2,
   saturation: 1.42, brightness: 0, contrast: 1, depthEffect: true, chromaticAberration: true,
   tintColor: [.18, .52, .72], tintAlpha: .03, surfaceColor: [.80, .94, 1], surfaceAlpha: .04,
@@ -126,15 +129,17 @@ export class ReferenceLyricsWallpaper {
     const rowGap = this.rowGap();
     const centerY = this.height / 2;
     const rows: GlassElementConfig[] = [];
-    const first = Math.max(0, this.active - ROW_WINDOW);
-    const last = Math.min(this.lyrics.length - 1, this.active + ROW_WINDOW);
+    const renderWindow = Math.ceil(this.settings.lyricDepthCullDistance) + 1;
+    const first = Math.max(0, Math.floor(focus - renderWindow));
+    const last = Math.min(this.lyrics.length - 1, Math.ceil(focus + renderWindow));
     for (let index = first; index <= last; index++) {
       const distance = Math.abs(index - focus);
-      const emphasis = this.smoothstep(Math.max(0, 1 - distance));
-      const typography = this.fitTypography(this.lyrics[index].text, 700, .72 + .28 * emphasis);
-      const alpha = this.lyricAlpha(distance, emphasis);
+      const scale = this.depthScale(distance);
+      const alpha = this.depthAlpha(distance);
+      const glassStrength = this.depthGlassStrength(alpha);
+      const typography = this.fitTypography(this.lyrics[index].text, 700, scale);
       const rect = this.lyricRect(index, centerY, rowGap, typography);
-      rows.push(this.glassRow(index, rect));
+      rows.push(this.glassRow(index, rect, glassStrength));
       const textRect = { ...rect, y: rect.y + typography.opticalOffset + this.settings.lyricVerticalOffset };
       rows.push({
         ...this.base(`lyric-${index}`, "text", textRect),
@@ -156,11 +161,20 @@ export class ReferenceLyricsWallpaper {
 
   private rowGap(): number { return Math.min(240, Math.max(96, this.height * .135) + this.settings.lyricGap); }
 
-  private smoothstep(value: number): number { return value * value * (3 - 2 * value); }
+  private depthScale(distance: number): number {
+    const s = this.settings;
+    return s.lyricDepthMinScale + (1 - s.lyricDepthMinScale) /
+      (1 + s.lyricDepthScaleFalloff * distance ** s.lyricDepthScaleCurve);
+  }
 
-  private lyricAlpha(distance: number, emphasis: number): number {
-    if (distance <= 1) return .58 + .42 * emphasis;
-    return Math.max(.04, .58 * (3 - distance) / 2);
+  private depthAlpha(distance: number): number {
+    const s = this.settings;
+    return Math.exp(-s.lyricDepthAlphaFalloff * distance ** s.lyricDepthAlphaCurve);
+  }
+
+  private depthGlassStrength(alpha: number): number {
+    const floor = this.settings.lyricDepthGlassFloor;
+    return floor + (1 - floor) * alpha;
   }
 
   private fitTypography(text: string, fontWeight: number, scale: number): { fontSize: number; width: number; height: number; padding: number; opticalOffset: number } {
@@ -237,22 +251,22 @@ export class ReferenceLyricsWallpaper {
     };
   }
 
-  private glassRow(index: number, rect: { x: number; y: number; w: number; h: number }): GlassElementConfig {
+  private glassRow(index: number, rect: { x: number; y: number; w: number; h: number }, strength: number): GlassElementConfig {
     return {
       ...this.base(`lyric-glass-${index}`, "glass-shape", rect),
       cornerRadius: Math.min(this.settings.cornerRadius, rect.h * .45),
-      refractionHeight: this.settings.refractionHeight,
-      refractionAmount: this.settings.refractionAmount,
+      refractionHeight: this.settings.refractionHeight * strength,
+      refractionAmount: this.settings.refractionAmount * strength,
       depthEffect: this.settings.depthEffect,
       chromaticAberration: this.settings.chromaticAberration,
-      blurRadius: this.settings.blurRadius,
+      blurRadius: this.settings.blurRadius * strength,
       saturation: this.settings.saturation,
       brightness: this.settings.brightness,
       contrast: this.settings.contrast,
-      surfaceColor: [...this.settings.surfaceColor, this.settings.surfaceAlpha],
-      tintColor: [...this.settings.tintColor, this.settings.tintAlpha],
-      highlight: this.settings.highlight ? { mode: this.settings.highlightMode, color: this.settings.highlightColor, angle: this.settings.highlightAngle, falloff: this.settings.highlightFalloff, alpha: this.settings.highlightAlpha, widthDp: this.settings.highlightWidth } : null,
-      outerShadow: this.settings.shadow ? { radius: this.settings.shadowRadius, alpha: this.settings.shadowAlpha, offsetX: this.settings.shadowOffsetX, offsetY: this.settings.shadowOffsetY, color: this.settings.shadowColor } : null,
+      surfaceColor: [...this.settings.surfaceColor, this.settings.surfaceAlpha * strength],
+      tintColor: [...this.settings.tintColor, this.settings.tintAlpha * strength],
+      highlight: this.settings.highlight ? { mode: this.settings.highlightMode, color: this.settings.highlightColor, angle: this.settings.highlightAngle, falloff: this.settings.highlightFalloff, alpha: this.settings.highlightAlpha * strength, widthDp: this.settings.highlightWidth } : null,
+      outerShadow: this.settings.shadow ? { radius: this.settings.shadowRadius, alpha: this.settings.shadowAlpha * strength, offsetX: this.settings.shadowOffsetX, offsetY: this.settings.shadowOffsetY, color: this.settings.shadowColor } : null,
       independentBackdrop: true,
       directBackdropSample: this.settings.directBackdrop,
       useSeparableBlur: this.settings.separableBlur,

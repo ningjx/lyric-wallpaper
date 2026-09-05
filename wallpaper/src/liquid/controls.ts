@@ -20,6 +20,15 @@ const groups: Array<{ title: string; controls: Control[] }> = [
     { key: "lyricOffsetY", label: "整体垂直", kind: "range", min: -600, max: 600, step: 1 },
     { key: "lyricAlignment", label: "屏幕对齐", kind: "select", options: [["0", "居中"], ["1", "靠左"], ["2", "靠右"]] },
   ] },
+  { title: "空间层次", controls: [
+    { key: "lyricDepthMinScale", label: "远处最小缩放", kind: "range", min: .35, max: .95, step: .01 },
+    { key: "lyricDepthScaleFalloff", label: "缩放衰减", kind: "range", min: .05, max: 2, step: .01 },
+    { key: "lyricDepthScaleCurve", label: "缩放曲线", kind: "range", min: .5, max: 4, step: .01 },
+    { key: "lyricDepthAlphaFalloff", label: "淡出衰减", kind: "range", min: .05, max: 2, step: .01 },
+    { key: "lyricDepthAlphaCurve", label: "淡出曲线", kind: "range", min: .5, max: 4, step: .01 },
+    { key: "lyricDepthGlassFloor", label: "远处玻璃保留", kind: "range", min: 0, max: 1, step: .01 },
+    { key: "lyricDepthCullDistance", label: "渲染距离", kind: "range", min: 1, max: 6, step: .1 },
+  ] },
   { title: "光学", controls: [
     { key: "refractionHeight", label: "折射高度", kind: "range", min: 0, max: 56, step: 1 },
     { key: "refractionAmount", label: "折射强度", kind: "range", min: -80, max: 20, step: 1 },
