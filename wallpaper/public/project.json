@@ -2,7 +2,7 @@
   "description": "动态歌词壁纸：读取本机 Now Playing Service 的播放进度与同步歌词，当前句居中滚动显示",
   "file": "index.html",
   "general": { "properties": {
-    "lyricleadms": { "order": 1, "text": "歌词延迟（正值提前，ms）", "type": "slider", "min": -1000, "max": 1000, "value": 100, "editable": true },
+    "lyricleadms": { "order": 1, "text": "歌词延迟（正值提前，ms）", "type": "slider", "min": -5000, "max": 5000, "value": 100, "editable": true },
     "pollintervalms": { "order": 2, "text": "轮询 API 频率（ms）", "type": "slider", "min": 100, "max": 5000, "value": 200, "editable": true },
 
     "layoutopen": { "order": 10, "text": "展开 · 歌词排版", "type": "bool", "value": false },
