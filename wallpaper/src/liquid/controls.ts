@@ -112,12 +112,22 @@ export function mountLiquidControls(root: HTMLElement, wallpaper: ReferenceLyric
     content.append(section);
   }
   sync(settings);
+  const fitToViewport = (): void => {
+    root.style.transform = "";
+    if (panel.hidden) return;
+    const bounds = root.getBoundingClientRect();
+    const availableHeight = Math.max(1, innerHeight - bounds.top - 12);
+    const scale = Math.min(1, availableHeight / bounds.height);
+    if (scale < 1) root.style.transform = `scale(${scale})`;
+  };
   const setOpen = (open: boolean): void => {
     panel.hidden = !open;
     toggle.setAttribute("aria-expanded", String(open));
     root.classList.toggle("is-open", open);
+    requestAnimationFrame(fitToViewport);
   };
   toggle.addEventListener("click", () => setOpen(panel.hidden));
+  window.addEventListener("resize", fitToViewport);
   const updateSetting = (event: Event): void => {
     const input = event.target as HTMLInputElement;
     const key = input.dataset.setting as keyof LiquidSettings | undefined;
