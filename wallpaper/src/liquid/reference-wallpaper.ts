@@ -3,6 +3,7 @@ import { springStepCritical } from "../../vendor/liquid-glass-webgl/src/componen
 import type { GlassElementConfig } from "../../vendor/liquid-glass-webgl/src/components/liquid-glass/renderer";
 import type { LyricLine } from "../lyrics/parser";
 import type { LyricsTarget } from "../player/MusicState";
+import { BackgroundComposer, type BackgroundLayout } from "./background-composer";
 
 const FONT_RATIO = .050;
 const LYRIC_SCROLL_SETTLE_DISTANCE = .75;
@@ -15,6 +16,7 @@ export interface LiquidSettings {
   lyricOffsetX: number; lyricOffsetY: number; lyricAlignment: 0 | 1 | 2;
   lyricDepthMinScale: number; lyricDepthScaleFalloff: number; lyricDepthScaleCurve: number;
   lyricDepthAlphaFalloff: number; lyricDepthAlphaCurve: number; lyricDepthGlassFloor: number; lyricDepthCullDistance: number;
+  backgroundImage: string; backgroundLayout: BackgroundLayout; backgroundScale: number; backgroundOffsetX: number; backgroundOffsetY: number;
   cornerRadius: number; refractionHeight: number; refractionAmount: number; blurRadius: number; lyricBehindGlass: boolean;
   saturation: number; brightness: number; contrast: number; depthEffect: boolean; chromaticAberration: boolean;
   tintColor: [number, number, number]; tintAlpha: number; surfaceColor: [number, number, number]; surfaceAlpha: number;
@@ -29,6 +31,7 @@ export const DEFAULT_LIQUID_SETTINGS: LiquidSettings = {
   lyricOffsetX: 0, lyricOffsetY: -115, lyricAlignment: 0,
   lyricDepthMinScale: .61, lyricDepthScaleFalloff: .55, lyricDepthScaleCurve: 1.63,
   lyricDepthAlphaFalloff: .65, lyricDepthAlphaCurve: 1.12, lyricDepthGlassFloor: .15, lyricDepthCullDistance: 1.5,
+  backgroundImage: "", backgroundLayout: 0, backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0,
   cornerRadius: 45, refractionHeight: 4, refractionAmount: -34, blurRadius: 0, lyricBehindGlass: false,
   saturation: 1.35, brightness: 0, contrast: 1, depthEffect: true, chromaticAberration: false,
   tintColor: [.18, .52, .72], tintAlpha: 0, surfaceColor: [.80, .94, 1], surfaceAlpha: 0,
@@ -55,6 +58,8 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   private readonly glyphMeasureCanvas = document.createElement("canvas");
   private readonly glyphMeasure = this.glyphMeasureCanvas.getContext("2d", { willReadFrequently: true })!;
   private readonly opticalOffsetRatios = new Map<string, number>();
+  private readonly backgroundComposer = new BackgroundComposer();
+  private backgroundRequest = 0;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -71,7 +76,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
 
   async start(): Promise<void> {
     this.resize();
-    await this.renderer.loadWallpaper(WALLPAPER_SOURCE);
+    await this.refreshBackground();
     this.rebuild(0);
   }
 
@@ -79,6 +84,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     this.width = innerWidth;
     this.height = innerHeight;
     this.renderer.resize(this.width, this.height);
+    void this.refreshBackground();
     this.rebuild(this.active < 0 ? 0 : this.active);
   }
 
@@ -116,6 +122,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
 
   dispose(): void {
     this.disposed = true;
+    this.backgroundComposer.dispose();
     this.renderer.dispose();
   }
 
@@ -166,11 +173,17 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     const previousFocus = previousRowGap > 0 ? this.scrollY / previousRowGap : this.active;
     const previousDpr = this.settings.dpr;
     const previousDownsample = this.settings.blurDownsample;
+    const backgroundChanged =
+      patch.backgroundImage !== undefined || patch.backgroundLayout !== undefined ||
+      patch.backgroundScale !== undefined || patch.backgroundOffsetX !== undefined ||
+      patch.backgroundOffsetY !== undefined ||
+      (patch.dpr !== undefined && previousDpr !== patch.dpr);
     this.settings = { ...this.settings, ...patch };
     this.applyRendererSettings();
     if (previousDpr !== this.settings.dpr || previousDownsample !== this.settings.blurDownsample) {
       this.renderer.resize(this.width, this.height);
     }
+    if (backgroundChanged) void this.refreshBackground();
     this.rebuild(this.active, previousFocus);
     this.lastLayoutScrollY = this.scrollY;
     this.renderer.markAllDirty();
@@ -220,6 +233,45 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     this.renderer.setElements(rows);
     this.renderer.setContentHeight(this.height + Math.max(0, this.lyrics.length - 1) * rowGap);
     this.renderer.setScrollY(this.scrollY);
+  }
+
+  private async refreshBackground(): Promise<void> {
+    if (!this.width || !this.height || this.disposed) return;
+    const request = ++this.backgroundRequest;
+    const s = this.settings;
+    const source = this.backgroundSource(s.backgroundImage);
+    try {
+      const texture = await this.backgroundComposer.compose({
+        source,
+        layout: s.backgroundLayout,
+        scale: s.backgroundScale,
+        offsetX: s.backgroundOffsetX,
+        offsetY: s.backgroundOffsetY,
+        pixelRatio: Math.min(devicePixelRatio || 1, s.dpr),
+      }, this.width, this.height);
+      if (request !== this.backgroundRequest || this.disposed) {
+        this.backgroundComposer.discard(texture);
+        return;
+      }
+      await this.renderer.loadWallpaper(texture);
+      if (request !== this.backgroundRequest || this.disposed) {
+        this.backgroundComposer.discard(texture);
+        if (!this.disposed) void this.refreshBackground();
+        return;
+      }
+      this.backgroundComposer.activate(texture);
+    } catch (error) {
+      // 用户删除已选择的文件或浏览器拒绝访问时，始终回退到内置图片。
+      if (request === this.backgroundRequest && !this.disposed && source !== WALLPAPER_SOURCE) {
+        await this.renderer.loadWallpaper(WALLPAPER_SOURCE);
+      }
+    }
+  }
+
+  private backgroundSource(value: string): string {
+    if (!value) return WALLPAPER_SOURCE;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return value;
+    return `file:///${value.replace(/\\/g, "/")}`;
   }
 
   private rowGap(): number {
