@@ -43,6 +43,17 @@ PROVIDER_BUILDERS = {
     "qq": lambda cfg, http, fs: QQMusicLyricsProvider(http),
 }
 
+CONSOLE_TITLE = "歌词壁纸服务"
+
+
+def player_console_title(song: str, author: str) -> str:
+    """控制台标题保持紧凑，避免过长歌名挤掉任务栏文字。"""
+    def trunc(value: str, limit: int = 48) -> str:
+        return value if len(value) <= limit else value[:limit - 1] + "…"
+
+    track = " — ".join(part for part in (trunc(song), trunc(author)) if part)
+    return f"{track} | {CONSOLE_TITLE}" if track else CONSOLE_TITLE
+
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -97,6 +108,7 @@ def build_lyrics_chain(cfg: ServerConfig, http: HttpClient) -> LyricsChain:
 
 
 async def serve(cfg: ServerConfig) -> None:
+    console.set_window_title(CONSOLE_TITLE)
     loop = asyncio.get_running_loop()
     metrics = Metrics()
     arbiter = Arbiter(priority=cfg.source_priority,
@@ -126,6 +138,8 @@ async def serve(cfg: ServerConfig) -> None:
 
     def on_state() -> None:
         res = store.resolved
+        if not res.has_song:
+            console.set_window_title(CONSOLE_TITLE)
         song = (res.song, res.author) if res.has_song else None
         rstate = (store.track_context.resolve_state
                   if store.track_context else "idle")
@@ -136,6 +150,7 @@ async def serve(cfg: ServerConfig) -> None:
         hub.publish({"type": "state", "state": _state_snapshot(store)})
 
     def on_song(song: str, author: str, duration: float) -> None:
+        console.set_window_title(player_console_title(song, author))
         resolver.schedule(song, author, duration)  # 切歌才解析歌词
         last["song"] = (song, author)
         hub.publish({"type": "song", "state": _state_snapshot(store)})

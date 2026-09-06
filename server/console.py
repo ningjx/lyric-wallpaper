@@ -57,12 +57,32 @@ class Console:
         self._visible = False
         self._frame = 0
         self._cursor_hidden = False
+        self._window_title = ""
         # 非交互（重定向到文件）时不启用原地刷新，避免输出控制字符
         self._tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
     def _raw(self, text: str):
         sys.stdout.write(text)
         sys.stdout.flush()
+
+    def set_window_title(self, title: str) -> None:
+        """更新 Windows 控制台/终端标签标题。"""
+        safe_title = title.replace("\x1b", "").replace("\x07", "").replace("\r", " ").replace("\n", " ")
+        if safe_title == self._window_title:
+            return
+        self._window_title = safe_title
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.kernel32.SetConsoleTitleW(safe_title)
+            except Exception:
+                pass
+        # Windows Terminal 等宿主使用 OSC 0 更新标签页标题。
+        if self._tty:
+            try:
+                self._raw(f"\x1b]0;{safe_title}\x07")
+            except Exception:
+                pass
 
     def _paint(self, text: str, *colors: str) -> str:
         """交互终端使用 ANSI 色彩；重定向输出保持纯文本。"""
