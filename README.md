@@ -11,6 +11,8 @@
 
 > 一眼看懂：`wallpaper/` 是壁纸源码，`server/` 是服务端，`docs/` 是文档。壁纸构建产物**不入库**，由 GitHub Actions 打 tag 时自动构建发布（见 [Releases](https://github.com/ningjx/lyric-wallpaper/releases)）。
 
+![演示图片](https://raw.githubusercontent.com/ningjx/lyric-wallpaper/refs/heads/main/docs/Snipaste_2026-09-06_11-00-27.png)
+
 ## 架构
 
 ```text
