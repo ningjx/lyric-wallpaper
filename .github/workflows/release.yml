@@ -21,6 +21,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: true  # ✅ 添加这一行：拉取子模块
+          fetch-depth: 0    # 拉取完整历史，确保子模块能正确检出
 
       - name: Setup Node
         uses: actions/setup-node@v6
