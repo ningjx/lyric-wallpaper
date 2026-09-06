@@ -51,7 +51,7 @@ def player_console_title(song: str, author: str) -> str:
     def trunc(value: str, limit: int = 48) -> str:
         return value if len(value) <= limit else value[:limit - 1] + "…"
 
-    track = " — ".join(part for part in (trunc(song), trunc(author)) if part)
+    track = " - ".join(part for part in (trunc(song), trunc(author)) if part)
     return f"{track} | {CONSOLE_TITLE}" if track else CONSOLE_TITLE
 
 
