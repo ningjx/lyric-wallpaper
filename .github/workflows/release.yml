@@ -22,8 +22,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          submodules: true  # ✅ 添加这一行：拉取子模块
+          # The upstream dependency contains an unconfigured nested submodule.
+          # Initialize only our direct dependency below, without recursion.
+          submodules: false
           fetch-depth: 0    # 拉取完整历史，确保子模块能正确检出
+
+      - name: Initialize wallpaper renderer dependency
+        run: git submodule update --init wallpaper/vendor/liquid-glass-webgl
 
       - name: Setup Node
         uses: actions/setup-node@v6
