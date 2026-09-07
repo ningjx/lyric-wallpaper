@@ -10,7 +10,7 @@
  * 接到这里，回调给渲染器与 CSS 变量。
  */
 import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_GAP } from "./defaults";
-import { DEFAULT_LIQUID_SETTINGS, type LiquidSettings } from "./liquid/reference-wallpaper";
+import { DEFAULT_LIQUID_SETTINGS, DEFAULT_SEPARABLE_BLUR_RADIUS, type LiquidSettings } from "./liquid/reference-wallpaper";
 
 /** 可调节的歌词布局参数 */
 export interface WallpaperSettings {
@@ -111,6 +111,19 @@ export function setupWallpaperEnvironment(onChange: SettingsListener): void {
       for (const [property, key] of Object.entries(COLOR_PROPERTIES)) {
         const value = readColor(propertyValue(properties[property]));
         if (value !== null) (current.liquid as Record<string, unknown>)[key] = value;
+      }
+
+      // 此回调下发的是当前完整配置，而不是只下发到渲染器的差量。因而要在
+      // 合并前判断「本次刚开启高质量，但没有同时手调半径」；否则默认半径 0
+      // 会让高质量路径在视觉上像是完全失效。
+      const enabledSeparableBlur = readBoolean(propertyValue(properties.separableblur));
+      const suppliedBlurRadius = readNumber(propertyValue(properties.blurradius));
+      if (
+        enabledSeparableBlur === true &&
+        suppliedBlurRadius === null &&
+        current.liquid.blurRadius < .5
+      ) {
+        current.liquid.blurRadius = DEFAULT_SEPARABLE_BLUR_RADIUS;
       }
 
       onChange({ ...current });

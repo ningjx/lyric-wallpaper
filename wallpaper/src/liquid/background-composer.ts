@@ -16,10 +16,13 @@ export interface BackgroundOptions {
 export class BackgroundComposer {
   private image: HTMLImageElement | null = null;
   private imageSource = "";
-  private activeObjectUrl: string | null = null;
-  private readonly objectUrls = new Set<string>();
 
-  async compose(options: BackgroundOptions, width: number, height: number): Promise<string> {
+  /**
+   * 合成后的 Canvas 直接作为 WebGL 的 texImage2D 输入。旧实现会把它编码为
+   * PNG Blob，再由 Image 重新解码后上传；这会在切换大背景时制造额外的主
+   * 线程工作、内存峰值和一次无意义的编解码。
+   */
+  async compose(options: BackgroundOptions, width: number, height: number): Promise<HTMLCanvasElement> {
     const image = await this.load(options.source);
     const ratio = Math.max(.5, options.pixelRatio);
     const outputWidth = Math.max(1, Math.round(width * ratio));
@@ -68,35 +71,16 @@ export class BackgroundComposer {
       );
     }
 
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-    if (!blob) throw new Error("Unable to compose background texture");
-    const url = URL.createObjectURL(blob);
-    this.objectUrls.add(url);
-    return url;
-  }
-
-  /** 在 WebGL 已上传新纹理后才释放上一张 Blob，避免快速调参时出现竞态。 */
-  activate(url: string): void {
-    for (const candidate of this.objectUrls) {
-      if (candidate !== url) {
-        URL.revokeObjectURL(candidate);
-        this.objectUrls.delete(candidate);
-      }
-    }
-    this.activeObjectUrl = url;
-  }
-
-  discard(url: string): void {
-    if (url === this.activeObjectUrl) return;
-    if (this.objectUrls.delete(url)) URL.revokeObjectURL(url);
+    return canvas;
   }
 
   dispose(): void {
-    for (const url of this.objectUrls) URL.revokeObjectURL(url);
-    this.objectUrls.clear();
-    this.activeObjectUrl = null;
     this.image = null;
     this.imageSource = "";
+  }
+
+  uploadCanvas(renderer: LiquidGlassRenderer, canvas: HTMLCanvasElement): void {
+    this.uploadTexture(renderer, canvas, canvas.width, canvas.height);
   }
 
   /**
@@ -105,14 +89,16 @@ export class BackgroundComposer {
    */
   async uploadSource(renderer: LiquidGlassRenderer, source: string): Promise<void> {
     const image = await this.load(source);
+    this.uploadTexture(renderer, image, image.naturalWidth || 1, image.naturalHeight || 1);
+  }
+
+  private uploadTexture(renderer: LiquidGlassRenderer, source: TexImageSource, width: number, height: number): void {
     const gl = renderer.gl;
     const texture = gl.createTexture();
     if (!texture) throw new Error("Unable to create background texture");
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-    const width = image.naturalWidth || 1;
-    const height = image.naturalHeight || 1;
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
     const isPowerOfTwo = (width & (width - 1)) === 0 && (height & (height - 1)) === 0;
     if (isPowerOfTwo) {
       gl.generateMipmap(gl.TEXTURE_2D);

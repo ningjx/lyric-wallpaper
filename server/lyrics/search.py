@@ -20,6 +20,7 @@ from .identities import TrackIdentifiers, normalize_key
 from .similarity import calculate_similarity, EXACT_MATCH_THRESHOLD
 
 NETEASE_SEARCH_URL = "https://interface3.music.163.com/eapi/search/get"
+NETEASE_PUBLIC_SEARCH_URL = "https://music.163.com/api/search/get/web"
 QQ_SEARCH_URL = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp"
 
 
@@ -93,6 +94,34 @@ class NeteaseSearcher(TrackSearcher):
 
     async def _fetch(self, ids: TrackIdentifiers) -> Optional[dict]:
         query = f"{ids.title} {ids.artist}".strip()
+        # 公开搜索接口在新版客户端/网络环境中比 eapi 更稳定；先走它可以避开
+        # eapi 被风控或协议变更后把所有歌曲降级为 local-* ID 的问题。
+        try:
+            resp = await self.http.get_json(
+                NETEASE_PUBLIC_SEARCH_URL,
+                params={"s": query, "type": "1", "limit": "5"},
+                headers={"User-Agent": USER_AGENT,
+                         "Referer": "https://music.163.com/",
+                         "Cookie": "appver=2.10.6; os=pc;"},
+                key=f"search:netease-public:{query}")
+        except Exception:
+            resp = None
+        if resp and resp.get("code") == 200:
+            songs = ((resp.get("result") or {}).get("songs")) or []
+            best = _pick_best(ids.title, ids.artist, songs, "name", "artists", "name")
+            if best is not None:
+                album = best.get("album") or {}
+                return {
+                    "id": str(best.get("id", "")),
+                    "title": best["_title"] or ids.title,
+                    "author": best["_author"] or ids.artist,
+                    "album": album.get("name", "") or "",
+                    "cover": album.get("picUrl", "") or "",
+                    "duration": round((best.get("duration", 0) or 0) / 1000, 3),
+                    "similarity": best["_similarity"],
+                }
+
+        # 公开端点异常时才回退 eapi，保留旧实现对受限曲库/返回字段的兼容性。
         data = {
             "s": query, "limit": "5", "offset": "0", "type": "1",
             "csrf_token": "",

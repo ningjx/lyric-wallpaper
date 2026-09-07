@@ -37,9 +37,17 @@ class HttpClient:
         self._fuse_cooldown = fuse_cooldown
         self._headers = headers or DEFAULT_HEADERS
         self._own_session = session is None
-        self._session = session or aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=timeout),
-            headers=self._headers)
+        # 有安装 aiodns 的 Windows 环境中，aiohttp 会优先使用其 c-ares
+        # resolver；部分网络/DNS 配置下它会报“Could not contact DNS servers”，
+        # 但系统解析器和 urllib 均正常。固定使用线程式系统 DNS，避免歌词
+        # 搜索与下载因可选依赖而整体失效。
+        if session is not None:
+            self._session = session
+        else:
+            connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=timeout),
+                headers=self._headers, connector=connector)
         self._fuse_failures = 0
         self._fuse_until = 0.0
         self._inflight: Dict[str, asyncio.Future] = {}

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import struct
 import time
+import re
 
 from ..console import console
 from ..core.state import RawSnapshot
@@ -22,6 +23,31 @@ from .base import PollingSource
 
 PROCESS_NAME = "cloudmusic.exe"
 MODULE_NAME = "cloudmusic.dll"
+_SMTC_WINDOW_MARKER = "mediaplayer smtc window"
+_GUID_ONLY = re.compile(r"^\{[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\}$", re.IGNORECASE)
+
+
+def parse_track_window_title(value: str) -> tuple[str, str] | None:
+    """从网易云主窗口标题提取 ``歌名 - 歌手``，拒绝内部宿主窗口。
+
+    新版网易云会在同一 ``cloudmusic.exe`` 进程中创建名为
+    ``MediaPlayer SMTC window - {GUID}`` 的内部窗口。它恰好满足旧版的
+    分隔符规则，却不是歌曲元数据；必须在进入缓存和状态仲裁前过滤。
+    """
+    title = " ".join(value.split())
+    if " - " not in title or _SMTC_WINDOW_MARKER in title.lower():
+        return None
+    song, author = (part.strip() for part in title.split(" - ", 1))
+    if not song or not author or _GUID_ONLY.fullmatch(author):
+        return None
+    return song, author
+
+
+def select_track_window_title(candidates: list[tuple[bool, str]]) -> str:
+    """从同进程窗口中选择一个合法歌曲标题，优先可见主窗口。"""
+    valid = [(visible, title) for visible, title in candidates
+             if parse_track_window_title(title) is not None]
+    return max(valid, key=lambda item: (item[0], len(item[1])))[1] if valid else ""
 
 
 class NeteaseSource(PollingSource):
@@ -60,9 +86,8 @@ class NeteaseSource(PollingSource):
         try:
             progress, duration = self._read(offsets)
             title = self._get_title(duration)
-            song = author = ""
-            if " - " in title:
-                song, author = title.split(" - ", 1)
+            track = parse_track_window_title(title)
+            song, author = track if track is not None else ("", "")
             playing = self._classify(progress)
             if song.strip() and duration > 0:
                 self._note_playing(song.strip(), author.strip(), duration)
@@ -143,8 +168,10 @@ class NeteaseSource(PollingSource):
         now = time.time()
         cached, age = self._title_cache
         dkey = round(duration, 1)
-        # 只有「新歌（时长变化）/ 标题为空 / 超过兜底间隔」才重新枚举全桌面
-        if cached and now - age < self.title_recheck and dkey == self._last_dur_key:
+        # 有效标题按正常间隔复查；无标题时缩短重试，既不会将内部窗口缓存为
+        # 歌曲，也能在主窗口稍后创建/恢复可见时尽快补齐元数据。
+        recheck = self.title_recheck if cached else min(2.0, self.title_recheck)
+        if now - age < recheck and dkey == self._last_dur_key:
             return cached
         title = self._enumerate_title()
         self._title_cache = (title, now)
@@ -155,20 +182,23 @@ class NeteaseSource(PollingSource):
         import win32gui
         import win32process
 
-        titles = []
+        titles: list[tuple[bool, str]] = []
 
         def cb(hwnd, _):
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
             if pid == self._pm.process_id:
                 t = win32gui.GetWindowText(hwnd)
-                # 标题格式 '歌名 - 歌手'，排除桌面歌词/迷你播放器等干扰窗口
-                if (" - " in t and "桌面歌词" not in t
-                        and "迷你播放器" not in t and "GDI+" not in t):
-                    titles.append(t)
+                # 标题格式“歌名 - 歌手”。除桌面歌词等旧干扰项外，必须排除
+                # 同进程的 MediaPlayer SMTC 内部窗口（标题末尾为 GUID）。
+                if ("桌面歌词" not in t and "迷你播放器" not in t
+                        and "GDI+" not in t):
+                    titles.append((bool(win32gui.IsWindowVisible(hwnd)), t))
             return True
 
         try:
             win32gui.EnumWindows(cb, None)
         except Exception:
             return self._title_cache[0]
-        return max(titles, key=len) if titles else self._title_cache[0]
+        # 主窗口通常可见。最小化时仍允许不可见的合法标题作为回退；不能再按
+        # “最长字符串”选，以免内部诊断窗口覆盖真正歌曲标题。
+        return select_track_window_title(titles)

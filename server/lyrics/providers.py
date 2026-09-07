@@ -25,6 +25,7 @@ from .search import _parse_jsonp
 from .similarity import EXACT_MATCH_THRESHOLD
 
 NETEASE_LYRIC_URL = "https://interface3.music.163.com/eapi/song/lyric/v1"
+NETEASE_PUBLIC_LYRIC_URL = "https://music.163.com/api/song/lyric"
 QQ_LYRIC_URL = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
 
 
@@ -96,6 +97,29 @@ class NeteaseLyricsProvider(LyricsProvider):
         similarity = _match_of(ids, "netease").similarity
         if not _match_ok(ids, similarity):
             return _empty_result("netease", ids, similarity)
+
+        # 与搜索相同：公开接口 + appver Cookie 是当前最稳定的主路径。eapi
+        # 作为补充回退，以便保留可能更完整的 yrc/karaoke 字段。
+        try:
+            resp = await self.http.get_json(
+                NETEASE_PUBLIC_LYRIC_URL,
+                params={"id": ids.netease_id, "lv": "-1", "kv": "-1", "tv": "-1"},
+                headers={"User-Agent": USER_AGENT,
+                         "Referer": "https://music.163.com/",
+                         "Cookie": "appver=2.10.6; os=pc;"},
+                key=f"lyric:netease-public:{ids.netease_id}")
+        except Exception:
+            resp = None
+        if resp and resp.get("code") == 200:
+            lrc = (resp.get("lrc") or {}).get("lyric", "") or ""
+            if lrc:
+                return LyricsResult(
+                    provider="netease", has_lyric=True, lrc=lrc,
+                    translated_lyric=(resp.get("tlyric") or {}).get("lyric", "") or "",
+                    karaoke_lyric=(resp.get("klyric") or {}).get("lyric", "") or "",
+                    similarity=similarity,
+                    meta={"netease_id": ids.netease_id},
+                )
 
         data = {
             "id": ids.netease_id, "cp": "false", "lv": "0", "kv": "0",

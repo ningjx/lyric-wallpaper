@@ -4,6 +4,7 @@ import type { GlassElementConfig } from "../../vendor/liquid-glass-webgl/src/com
 import type { LyricLine } from "../lyrics/parser";
 import type { LyricsTarget } from "../player/MusicState";
 import { BackgroundComposer, type BackgroundLayout } from "./background-composer";
+import { ScrollRenderGate } from "./render-scheduler";
 
 const FONT_RATIO = .050;
 const LYRIC_SCROLL_SETTLE_DISTANCE = .75;
@@ -44,6 +45,12 @@ export const DEFAULT_LIQUID_SETTINGS: LiquidSettings = {
   dpr: 1, blurTapCap: 9, blurDownsample: 2, kawaseBlur: true, blurCache: true, perElementFbo: true,
 };
 
+/**
+ * \"高质量全场模糊\"只是切换模糊算法；半径为 0 时两条路径都会刻意跳过
+ * 模糊。首次启用该选项时提供一个保守的可见值，避免开关看起来没有生效。
+ */
+export const DEFAULT_SEPARABLE_BLUR_RADIUS = 12;
+
 export class ReferenceLyricsWallpaper implements LyricsTarget {
   private readonly renderer: LiquidGlassRenderer;
   private scrollY = 0;
@@ -52,6 +59,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   private active = -1;
   private lastFrame = 0;
   private lastLayoutScrollY = Number.NaN;
+  private readonly scrollRenderGate = new ScrollRenderGate();
   private width = 0;
   private height = 0;
   private disposed = false;
@@ -114,7 +122,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
       this.scrollY = shouldSettle ? target : next.current;
       this.velocity = shouldSettle ? 0 : next.velocity;
     }
-    this.renderer.setScrollY(this.scrollY);
+    this.commitScrollY();
     if (nextActive !== this.active || Math.abs(this.scrollY - this.lastLayoutScrollY) > .05) {
       this.rebuild(nextActive, this.scrollY / rowGap);
       this.lastLayoutScrollY = this.scrollY;
@@ -160,6 +168,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     this.scrollY = 0;
     this.velocity = 0;
     this.hasPositioned = false;
+    this.scrollRenderGate.reset();
     this.rebuild(0);
     this.renderer.markAllDirty();
     this.renderer.requestRender();
@@ -170,6 +179,17 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   }
 
   setSettings(patch: Partial<LiquidSettings>): void {
+    // Wallpaper Engine 的属性回调通常只包含刚变化的字段。高质量开关的
+    // 默认半径又是 0，若不补齐一个可见半径，用户仅勾选开关会得到完全相同
+    // 的画面。显式传入 blurRadius（包括 0）始终优先，因而仍可手动关闭模糊。
+    const nextPatch = { ...patch };
+    if (
+      patch.separableBlur === true &&
+      patch.blurRadius === undefined &&
+      this.settings.blurRadius < .5
+    ) {
+      nextPatch.blurRadius = DEFAULT_SEPARABLE_BLUR_RADIUS;
+    }
     // 使用变更前的行距保留当前滚动位置对应的歌词序号。否则调节行距时会
     // 用新行距除旧 scrollY，造成焦点跳行，掩盖了行距本身的视觉变化。
     const previousRowGap = this.rowGap();
@@ -177,11 +197,11 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     const previousDpr = this.settings.dpr;
     const previousDownsample = this.settings.blurDownsample;
     const backgroundChanged =
-      patch.backgroundImage !== undefined || patch.backgroundLayout !== undefined ||
-      patch.backgroundScale !== undefined || patch.backgroundOffsetX !== undefined ||
-      patch.backgroundOffsetY !== undefined ||
-      (patch.dpr !== undefined && previousDpr !== patch.dpr);
-    this.settings = { ...this.settings, ...patch };
+      nextPatch.backgroundImage !== undefined || nextPatch.backgroundLayout !== undefined ||
+      nextPatch.backgroundScale !== undefined || nextPatch.backgroundOffsetX !== undefined ||
+      nextPatch.backgroundOffsetY !== undefined ||
+      (nextPatch.dpr !== undefined && previousDpr !== nextPatch.dpr);
+    this.settings = { ...this.settings, ...nextPatch };
     this.applyRendererSettings();
     if (previousDpr !== this.settings.dpr || previousDownsample !== this.settings.blurDownsample) {
       this.renderer.resize(this.width, this.height);
@@ -235,6 +255,16 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     }
     this.renderer.setElements(rows);
     this.renderer.setContentHeight(this.height + Math.max(0, this.lyrics.length - 1) * rowGap);
+    this.commitScrollY();
+  }
+
+  /**
+   * 上游 setScrollY() 每次都会请求重绘，即使位置未变。歌词停稳后 scrollY
+   * 恒定；在这里短路可以让 renderer 的 dirty 检查真正进入空闲状态，同时
+   * 不改变任一动画帧实际提交的坐标。
+   */
+  private commitScrollY(): void {
+    if (!this.scrollRenderGate.shouldCommit(this.scrollY)) return;
     this.renderer.setScrollY(this.scrollY);
   }
 
@@ -253,22 +283,20 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
         pixelRatio: Math.min(devicePixelRatio || 1, s.dpr),
       }, this.width, this.height);
       if (request !== this.backgroundRequest || this.disposed) {
-        this.backgroundComposer.discard(texture);
         return;
       }
-      await this.renderer.loadWallpaper(texture);
+      this.backgroundComposer.uploadCanvas(this.renderer, texture);
       if (request !== this.backgroundRequest || this.disposed) {
-        this.backgroundComposer.discard(texture);
         if (!this.disposed) void this.refreshBackground();
         return;
       }
-      this.backgroundComposer.activate(texture);
     } catch (error) {
       // 部分 Wallpaper Engine Chromium 对 file:/// → Canvas 的回写有限制。
       // 此时直接上传原图，至少保证自定义背景不会静默回退为默认图。
-      if (request === this.backgroundRequest && !this.disposed && source !== WALLPAPER_SOURCE) {
+      if (request === this.backgroundRequest && !this.disposed) {
         try {
-          await this.backgroundComposer.uploadSource(this.renderer, source);
+          if (source === WALLPAPER_SOURCE) await this.renderer.loadWallpaper(source);
+          else await this.backgroundComposer.uploadSource(this.renderer, source);
         } catch {
           await this.renderer.loadWallpaper(WALLPAPER_SOURCE);
         }
@@ -391,7 +419,14 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
       refractionAmount: this.settings.refractionAmount * strength,
       depthEffect: this.settings.depthEffect,
       chromaticAberration: this.settings.chromaticAberration,
-      blurRadius: lyricBehindGlass ? 0 : this.settings.blurRadius * strength,
+      // 默认局部模糊会随景深层级变弱。高质量模式则是整张壁纸的共享预模糊
+      // 纹理，所有歌词行必须使用同一半径，才能在滚动和换图后复用同一缓存；
+      // 否则每行每帧都会产生新半径并被缓存限额回退为清晰纹理。
+      blurRadius: lyricBehindGlass
+        ? 0
+        : this.settings.separableBlur
+          ? this.settings.blurRadius
+          : this.settings.blurRadius * strength,
       saturation: this.settings.saturation,
       brightness: this.settings.brightness,
       contrast: this.settings.contrast,
@@ -399,10 +434,11 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
       tintColor: [...this.settings.tintColor, this.settings.tintAlpha * strength],
       highlight: this.settings.highlight ? { mode: this.settings.highlightMode, color: this.settings.highlightColor, angle: this.settings.highlightAngle, falloff: this.settings.highlightFalloff, alpha: this.settings.highlightAlpha * strength, widthDp: this.settings.highlightWidth } : null,
       outerShadow: this.settings.shadow ? { radius: this.settings.shadowRadius, alpha: this.settings.shadowAlpha * strength, offsetX: this.settings.shadowOffsetX, offsetY: this.settings.shadowOffsetY, color: this.settings.shadowColor } : null,
-      // 高质量模糊以原始壁纸为统一背板：上游渲染器会缓存同半径的全场
-      // 高斯结果，滚动时也不会被场景模糊的每帧限流回退为清晰纹理。
+      // 高质量模式直接以原始壁纸作为统一输入，再执行两次分离模糊。不能走
+      // 场景 FBO：歌词滚动时该路径会受每帧缓存限流影响并退化为清晰背板。
+      // 默认模式保持局部、直接采样的低开销路径。
       independentBackdrop: this.settings.separableBlur && !lyricBehindGlass,
-      directBackdropSample: false,
+      directBackdropSample: !this.settings.separableBlur && !lyricBehindGlass,
       // The inline wallpaper path is bounded to this card's pixels and keeps
       // scroll coordinates exact. The optional high-quality setting switches
       // back to the renderer's full-scene separable blur.

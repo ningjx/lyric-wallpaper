@@ -22,6 +22,30 @@ from server.lyrics.providers import (
 from server.lyrics.similarity import (
     calculate_similarity, EXACT_MATCH_THRESHOLD,
 )
+from server.sources.netease import parse_track_window_title, select_track_window_title
+
+
+# ============ 网易云窗口标题 ============
+def test_netease_title_parser_accepts_track_metadata():
+    assert parse_track_window_title("晴天 - 周杰伦") == ("晴天", "周杰伦")
+
+
+def test_netease_title_parser_rejects_smtc_internal_window():
+    assert parse_track_window_title(
+        "MediaPlayer SMTC window - {94F35041-BD38-43EF-B9B2-025C4E563326}") is None
+
+
+def test_netease_title_parser_rejects_empty_or_incomplete_titles():
+    assert parse_track_window_title("网易云音乐") is None
+    assert parse_track_window_title("歌名 - ") is None
+
+
+def test_netease_title_selection_prefers_visible_song_over_smtc_window():
+    assert select_track_window_title([
+        (False, "MediaPlayer SMTC window - {94F35041-BD38-43EF-B9B2-025C4E563326}"),
+        (True, "当你 - 王心凌"),
+        (False, "当你 - 王心凌"),
+    ]) == "当你 - 王心凌"
 
 
 # ============ 仲裁 ============

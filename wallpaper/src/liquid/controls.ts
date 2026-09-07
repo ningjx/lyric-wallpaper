@@ -93,6 +93,9 @@ export function mountLiquidControls(root: HTMLElement, wallpaper: ReferenceLyric
   const toggle = root.querySelector<HTMLButtonElement>(".liquid-controls-toggle")!;
   const content = root.querySelector<HTMLElement>(".liquid-controls-groups")!;
   const settings = wallpaper.getSettings();
+  let appliedSettings = { ...settings };
+  let pendingSettings: Partial<LiquidSettings> = {};
+  let pendingSettingsFrame: number | null = null;
   const sync = (next: LiquidSettings): void => {
     for (const control of groups.flatMap((group) => group.controls)) {
       const input = content.querySelector<HTMLInputElement>(`[data-setting="${control.key}"]`)!;
@@ -128,12 +131,31 @@ export function mountLiquidControls(root: HTMLElement, wallpaper: ReferenceLyric
   };
   toggle.addEventListener("click", () => setOpen(panel.hidden));
   window.addEventListener("resize", fitToViewport);
+  const flushSettings = (): void => {
+    pendingSettingsFrame = null;
+    if (Object.keys(pendingSettings).length === 0) return;
+    wallpaper.setSettings(pendingSettings);
+    appliedSettings = { ...appliedSettings, ...pendingSettings };
+    pendingSettings = {};
+  };
+  const queueSettings = (patch: Partial<LiquidSettings>, immediate: boolean): void => {
+    pendingSettings = { ...pendingSettings, ...patch };
+    if (immediate) {
+      if (pendingSettingsFrame !== null) cancelAnimationFrame(pendingSettingsFrame);
+      flushSettings();
+      return;
+    }
+    if (pendingSettingsFrame === null) pendingSettingsFrame = requestAnimationFrame(flushSettings);
+  };
   const updateSetting = (event: Event): void => {
     const input = event.target as HTMLInputElement;
     const key = input.dataset.setting as keyof LiquidSettings | undefined;
     if (!key) return;
     const value = input.type === "checkbox" ? (input as HTMLInputElement).checked : input.type === "color" ? hexToRgb(input.value) : Number(input.value);
-    wallpaper.setSettings({ [key]: value } as Partial<LiquidSettings>);
+    if (!(key in pendingSettings) && sameSettingValue(appliedSettings[key], value)) return;
+    // range 的 input 事件可能在一次屏幕刷新期间触发多次。将它们合并为一
+    // 次 renderer 更新，既不丢失最终值，也避免反复重建 FBO/背景纹理。
+    queueSettings({ [key]: value } as Partial<LiquidSettings>, event.type === "change");
     const output = input.closest<HTMLElement>("label")?.querySelector<HTMLOutputElement>("output");
     const control = groups.flatMap((group) => group.controls).find((item) => item.key === key);
     if (output) output.value = format(value, control?.valueLabels);
@@ -141,10 +163,21 @@ export function mountLiquidControls(root: HTMLElement, wallpaper: ReferenceLyric
   content.addEventListener("input", updateSetting);
   content.addEventListener("change", updateSetting);
   root.querySelector<HTMLButtonElement>("[data-reset]")!.addEventListener("click", () => {
+    if (pendingSettingsFrame !== null) cancelAnimationFrame(pendingSettingsFrame);
+    pendingSettingsFrame = null;
+    pendingSettings = {};
     wallpaper.setSettings(DEFAULT_LIQUID_SETTINGS);
-    sync(wallpaper.getSettings());
+    appliedSettings = wallpaper.getSettings();
+    sync(appliedSettings);
   });
   return { setOpen };
+}
+
+function sameSettingValue(left: unknown, right: unknown): boolean {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((value, index) => value === right[index]);
+  }
+  return left === right;
 }
 
 function controlElement(control: Control, settings: LiquidSettings): HTMLLabelElement {
