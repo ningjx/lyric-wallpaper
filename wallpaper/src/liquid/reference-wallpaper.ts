@@ -10,6 +10,9 @@ import { ScrollRenderGate } from "./render-scheduler";
 const FONT_RATIO = .050;
 const LYRIC_SCROLL_SETTLE_DISTANCE = .75;
 const LYRIC_SCROLL_SETTLE_VELOCITY = 3;
+const SONG_ENTRY_SETTLE_DISTANCE = .75;
+const SONG_ENTRY_SETTLE_VELOCITY = 3;
+const SONG_ENTRY_SPEED = 4.4;
 const WALLPAPER_SOURCE = `${import.meta.env.BASE_URL}backgrounds/wallhaven-vpolwm.jpg`;
 const RENDERER_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
@@ -56,6 +59,9 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   private readonly renderer: LiquidGlassRenderer;
   private scrollY = 0;
   private velocity = 0;
+  /** 新歌曲不复位到顶部，而是从视窗下方平滑承接进入。 */
+  private songEntryOffsetY = 0;
+  private songEntryVelocity = 0;
   private hasPositioned = false;
   private active = -1;
   private lastFrame = 0;
@@ -123,8 +129,27 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
       this.scrollY = shouldSettle ? target : next.current;
       this.velocity = shouldSettle ? 0 : next.velocity;
     }
+    const previousEntryOffsetY = this.songEntryOffsetY;
+    if (this.songEntryOffsetY !== 0 || this.songEntryVelocity !== 0) {
+      const next = springStepCritical(
+        this.songEntryOffsetY,
+        this.songEntryVelocity,
+        0,
+        delta,
+        SONG_ENTRY_SPEED,
+      );
+      const shouldSettle =
+        Math.abs(next.current) < SONG_ENTRY_SETTLE_DISTANCE &&
+        Math.abs(next.velocity) < SONG_ENTRY_SETTLE_VELOCITY;
+      this.songEntryOffsetY = shouldSettle ? 0 : next.current;
+      this.songEntryVelocity = shouldSettle ? 0 : next.velocity;
+    }
     this.commitScrollY();
-    if (nextActive !== this.active || Math.abs(this.scrollY - this.lastLayoutScrollY) > .05) {
+    if (
+      nextActive !== this.active ||
+      Math.abs(this.scrollY - this.lastLayoutScrollY) > .05 ||
+      Math.abs(this.songEntryOffsetY - previousEntryOffsetY) > .05
+    ) {
       this.rebuild(nextActive, this.scrollY / rowGap);
       this.lastLayoutScrollY = this.scrollY;
     }
@@ -147,7 +172,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
 
   getPerformanceSnapshot(): { pipeline: "layered" | "scene-fbo"; renderer: PerfSnapshot } {
     return {
-      pipeline: this.renderer.transparentOutput ? "layered" : "scene-fbo",
+      pipeline: "scene-fbo",
       renderer: this.renderer.perfMonitor.getSnapshot(),
     };
   }
@@ -180,6 +205,8 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     this.active = -1;
     this.scrollY = 0;
     this.velocity = 0;
+    this.songEntryOffsetY = this.lyrics.length > 0 ? this.songEntryDistance() : 0;
+    this.songEntryVelocity = 0;
     this.hasPositioned = false;
     this.scrollRenderGate.reset();
     this.rebuild(0);
@@ -331,6 +358,10 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     return Math.max(96, this.height * .135 + this.settings.lyricGap);
   }
 
+  private songEntryDistance(): number {
+    return Math.max(this.height * .72, this.rowGap() * 1.4);
+  }
+
   private depthScale(distance: number): number {
     const s = this.settings;
     // (1 + d)^curve - 1 保持主歌词 d=0 为 0，同时避免 d=1 在所有曲线下
@@ -417,7 +448,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
         : (this.width - w) / 2;
     return {
       x: alignedX + this.settings.lyricOffsetX,
-      y: centerY + this.settings.lyricOffsetY - h / 2 + index * rowGap,
+      y: centerY + this.settings.lyricOffsetY - h / 2 + index * rowGap + this.songEntryOffsetY,
       w,
       h,
     };
