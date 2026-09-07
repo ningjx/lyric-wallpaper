@@ -4,6 +4,7 @@ import type { GlassElementConfig } from "../../vendor/liquid-glass-webgl/src/com
 import type { LyricLine } from "../lyrics/parser";
 import type { LyricsTarget } from "../player/MusicState";
 import { BackgroundComposer, type BackgroundLayout } from "./background-composer";
+import type { PerfSnapshot } from "../../vendor/liquid-glass-webgl/src/components/liquid-glass/renderer/perf-monitor";
 import { ScrollRenderGate } from "./render-scheduler";
 
 const FONT_RATIO = .050;
@@ -138,6 +139,18 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   }
 
   getSettings(): LiquidSettings { return { ...this.settings }; }
+
+  setPerformanceMonitoring(enabled: boolean): void {
+    this.renderer.perfMonitor.enabled = enabled;
+    if (enabled) this.renderer.perfMonitor.reset();
+  }
+
+  getPerformanceSnapshot(): { pipeline: "layered" | "scene-fbo"; renderer: PerfSnapshot } {
+    return {
+      pipeline: this.renderer.transparentOutput ? "layered" : "scene-fbo",
+      renderer: this.renderer.perfMonitor.getSnapshot(),
+    };
+  }
 
   /**
    * 将当前行的视觉焦点提前切换，使临界阻尼滚动在歌词时间点到来前收敛。
@@ -475,4 +488,5 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     this.renderer.quickToggles.outerShadow = s.shadow;
     this.renderer.quickToggles.perElementFbo = s.perElementFbo;
   }
+
 }

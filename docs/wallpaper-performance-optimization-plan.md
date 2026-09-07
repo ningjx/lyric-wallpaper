@@ -1,7 +1,7 @@
 # 壁纸性能优化方案
 
 > 版本：v1 · 2026-09-07
-> 状态：待实施
+> 状态：Stage 0 已完成；Stage 2 因当前 renderer 的不透明场景依赖而暂缓；Stage 5 已取消
 > 范围：`wallpaper/src/liquid/` 与其渲染器适配层
 > 约束：不降低默认视觉效果、不改变歌词同步与配置属性语义、不迁移 WebGL 版本。
 
@@ -65,6 +65,10 @@ requestAnimationFrame（持续运行）
 
 任何视觉路径修改前，先建立基线。渲染器已有性能监控能力，需通过本地适配层暴露只读统计，不进入正式用户界面。
 
+当前实现：控制台可通过 `window.lyricWallpaperPerformance.setEnabled(true)` 开启统计，
+`snapshot()` 获取 rAF/实际 render 频率、帧耗时、draw call、缓存命中与当前管线；调用
+`reset()` 开始新的采样窗口。调试 URL 追加 `?perf=1` 可在启动时直接启用。
+
 ### 采样场景
 
 | 场景 | 时长 | 用途 |
@@ -120,6 +124,8 @@ requestAnimationFrame（持续运行）
 ---
 
 ### Stage 2 · 静态背景层与动态歌词层分离（P1，高优先级）
+
+**当前结论**：已做透明叠层验证，但玻璃 shader 仍依赖不透明场景 FBO 的合成结果；透明输出会导致玻璃主体与折射失效。因此已回退该实验，待本地 renderer adapter 能完整提供场景背板后再继续，不以牺牲现有效果换取性能。
 
 **目标**：背景未变化时不参与动态歌词帧的全屏渲染。
 
@@ -200,20 +206,6 @@ requestAnimationFrame（持续运行）
 
 ---
 
-### Stage 5 · 自适应质量预设（低优先级，默认效果不变）
-
-**目标**：为低性能设备提供显式选择，但不悄悄降低默认画质。
-
-| 预设 | DPR | 高光/阴影 | 模糊 | 适用场景 |
-|---|---:|---|---|---|
-| 节能 | 0.75–1 | 可关闭 | 关闭 | 核显、笔记本省电 |
-| 平衡（默认） | 1 | 保持当前默认 | 保持当前默认 | 现有视觉基准 |
-| 质量 | 1.25–1.5 | 全开 | 可开高质量路径 | 中高端显卡 |
-
-动态降级不得默认启用；若后续引入，必须提供用户可见开关和恢复默认选项。
-
----
-
 ## 5. 暂不实施的方案
 
 ### WebGL 2 迁移
@@ -238,7 +230,6 @@ requestAnimationFrame（持续运行）
 4. `perf: split static background from lyric overlay`：完成 Stage 2，保留 FBO 回退。
 5. `perf: coalesce lyric visual updates`：完成 Stage 3。
 6. `perf: upload composed backgrounds without PNG round-trip`：完成 Stage 4。
-7. `feat: add explicit rendering quality presets`：完成 Stage 5（可选）。
 
 每个提交都应执行：
 

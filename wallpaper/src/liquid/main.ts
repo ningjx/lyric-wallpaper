@@ -7,6 +7,7 @@ import { MusicState } from "../player/MusicState";
 import { SceneController } from "../scene";
 import { DEFAULT_SETTINGS, setupWallpaperEnvironment, type WallpaperSettings } from "../wallpaper";
 import { ReferenceLyricsWallpaper } from "./reference-wallpaper";
+import { WallpaperPerformanceProbe, type WallpaperPerformanceSnapshot } from "./performance-probe";
 
 const lines = parseLrc(`[00:00.00]把城市的声音调低
 [00:05.50]听见晚风穿过缝隙
@@ -28,6 +29,8 @@ const params = new URLSearchParams(location.search);
 const still = params.get("still") === "1";
 const previewMode = still || params.get("demo") === "1";
 const requestedTime = Number(params.get("time") ?? 16.5);
+const performanceProbe = new WallpaperPerformanceProbe();
+const performanceEnabled = params.get("perf") === "1";
 let elapsed = Number.isFinite(requestedTime) ? Math.max(0, requestedTime) : 16.5;
 let last = performance.now();
 let frame: number | null = null;
@@ -113,6 +116,7 @@ async function boot(): Promise<void> {
     wallpaper = new ReferenceLyricsWallpaper(canvas, previewMode ? lines : []);
     await wallpaper.start();
     wallpaper.setSettings(wallpaperSettings.liquid);
+    wallpaper.setPerformanceMonitoring(performanceEnabled);
     syncBackgroundSlideshow();
     if (previewMode) {
       new SceneController(scene).show();
@@ -123,6 +127,7 @@ async function boot(): Promise<void> {
       musicState.start();
     }
     const tick = (now: number): void => {
+      performanceProbe.onAnimationFrame();
       if (previewMode && !still) elapsed += Math.min(.1, (now - last) / 1000);
       last = now;
       const songTime = previewMode
@@ -137,10 +142,32 @@ async function boot(): Promise<void> {
       );
       frame = requestAnimationFrame(tick);
     };
+    exposePerformanceProbe();
     tick(last);
   } catch {
     showFallback();
   }
+}
+
+function exposePerformanceProbe(): void {
+  const api = {
+    snapshot(): WallpaperPerformanceSnapshot | null {
+      if (!wallpaper) return null;
+      const snapshot = wallpaper.getPerformanceSnapshot();
+      return performanceProbe.snapshot(snapshot.pipeline, snapshot.renderer);
+    },
+    reset(): void {
+      if (!wallpaper) return;
+      wallpaper.setPerformanceMonitoring(true);
+      const snapshot = wallpaper.getPerformanceSnapshot();
+      performanceProbe.reset(snapshot.renderer);
+    },
+    setEnabled(enabled: boolean): void {
+      wallpaper?.setPerformanceMonitoring(enabled);
+      if (enabled && wallpaper) performanceProbe.reset(wallpaper.getPerformanceSnapshot().renderer);
+    },
+  };
+  (window as Window & { lyricWallpaperPerformance?: typeof api }).lyricWallpaperPerformance = api;
 }
 
 function findCurrentLineForWallpaper(time: number): number {
