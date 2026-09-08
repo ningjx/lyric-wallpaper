@@ -140,6 +140,7 @@ class TrayApplication(QApplication):
 
         icon_path = _asset_path("tray.svg")
         icon = QIcon(str(icon_path)) if icon_path.is_file() else self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay)
+        self.setWindowIcon(icon)
         self._tray = QSystemTrayIcon(icon, self)
         self._tray.setToolTip(f"{APP_NAME}：{self._status}")
         self._tray.setContextMenu(self._menu())

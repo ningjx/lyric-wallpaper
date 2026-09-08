@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $distRoot = Join-Path $projectRoot "release"
 $trayData = "$(Join-Path $projectRoot 'server/assets/tray.svg');server/assets"
+$appIcon = Join-Path $projectRoot "server/assets/LyricServer.ico"
 
 if ($Clean -and (Test-Path $distRoot)) {
   Remove-Item -LiteralPath $distRoot -Recurse -Force
@@ -16,6 +17,7 @@ try {
   python -m pip install -r server/requirements-desktop.txt
   python -m PyInstaller --noconfirm --clean --onefile --windowed `
     --name LyricServer `
+    --icon $appIcon `
     --add-data $trayData `
     --collect-submodules winrt `
     --distpath $distRoot `
