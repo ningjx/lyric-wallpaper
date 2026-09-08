@@ -6,10 +6,16 @@
  * Wallpaper 的 rAF 调度细节扩散到歌词布局与上游渲染器中。
  */
 export class ScrollRenderGate {
+  /**
+   * 远低于一个设备像素的位移不会带来可见差异，却会让 renderer 重新合成一帧。
+   * 该值必须与歌词布局重建使用的阈值保持一致。
+   */
+  static readonly VISUAL_THRESHOLD_CSS_PX = .05;
+
   private lastValue = Number.NaN;
 
   shouldCommit(value: number): boolean {
-    if (Math.abs(value - this.lastValue) <= Number.EPSILON) return false;
+    if (Math.abs(value - this.lastValue) <= ScrollRenderGate.VISUAL_THRESHOLD_CSS_PX) return false;
     this.lastValue = value;
     return true;
   }
