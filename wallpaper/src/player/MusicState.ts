@@ -11,12 +11,15 @@ import type { SceneController } from "../scene";
 export interface LyricsTarget {
   /** 设置歌词行（fallback 为无歌词/加载失败时显示的内容） */
   setLines(lines: LyricLine[], fallback?: string): void;
+  /** 切歌的第一阶段：将新歌信息行接入当前视觉歌词队列。 */
+  beginSong(title: string, author?: string): void;
+  /** 切歌的第二阶段：将异步到达的新歌歌词接到信息行之后。 */
+  resolveSongLyrics(lines: LyricLine[], position: number): void;
   /** 清空歌词（未播放/无歌曲） */
   clear(): void;
   /** 切歌时清空「当前歌」临时偏移（可选，仅需临时偏移功能的渲染层实现） */
   clearTempOffset?(): void;
 }
-
 /**
  * 音乐状态机：SSE 事件驱动 + 低频进度校准。
  *
@@ -37,6 +40,7 @@ export class MusicState {
   private calibrateTimer: number | null = null;
   private calibrating = false;
   private pollIntervalMs = 200;
+  private noSongTimer: number | null = null;
 
   constructor(
     private readonly api: NowPlayingApi,
@@ -64,6 +68,10 @@ export class MusicState {
       window.clearInterval(this.calibrateTimer);
       this.calibrateTimer = null;
     }
+    if (this.noSongTimer !== null) {
+      window.clearTimeout(this.noSongTimer);
+      this.noSongTimer = null;
+    }
     this.sse.stop();
   }
 
@@ -89,15 +97,13 @@ export class MusicState {
     this.clock.calibrate(s.progress || 0, s.hasSong && s.playing);
 
     if (!s.hasSong) {
-      // 无歌曲/停止播放：清空歌词、重置时钟并淡出场景层
-      this.clock.reset();
-      this.scene.hide();
-      if (this.songKey !== null) {
-        this.songKey = null;
-        this.target.clear();
-      }
+      // 无歌曲/停止播放：只清空歌词、重置时钟。壁纸场景必须常驻，不能
+      // 因播放器在切歌间隙短暂上报“无歌曲”而把整个桌面淡成黑色。
+      this.scheduleNoSongClear();
       return;
     }
+
+    this.cancelNoSongClear();
 
     // 歌曲变化：切歌（用 song|author 作 key，切歌事件的瞬间就有，不必等搜索返回 id）
     const key = `${s.song}|${s.author}`;
@@ -105,7 +111,8 @@ export class MusicState {
       this.songKey = key;
       // 切歌 → 清空上一首的临时偏移（仅当前歌有效）
       this.target.clearTempOffset?.();
-      // 歌词加载完成后才淡入场景层，避免"背景已显示、歌词还空白"的闪烁
+      // 立即把信息行接到旧歌的未渲染位置；歌词可稍后异步接入。
+      this.target.beginSong(s.song, s.author);
       void this.loadLyrics(s.song, s.author);
     } else {
       // 歌词已就绪：保持显示（含暂停状态，暂停时保留歌词停在当前句）
@@ -134,22 +141,18 @@ export class MusicState {
       const ly = await this.api.fetchLyrics();
       // 拉取期间可能已切歌/停播：过期结果直接丢弃
       if (mySeq !== this.seq || this.songKey === null) return;
-      if (!ly.hasLyric || !ly.lrc) {
-        this.target.setLines([], title);
-      } else {
+      if (ly.hasLyric && ly.lrc) {
         const original = parseLrc(ly.lrc);
         const lines =
           ly.hasTranslatedLyric && ly.translatedLyric
             ? mergeTranslation(original, parseLrc(ly.translatedLyric))
             : original;
-        // 前奏期间还没有歌词行，前置一行"歌曲名 - 歌手"占位作为前奏的当前行
-        this.target.setLines(withHeader(lines, title, author));
+        this.target.resolveSongLyrics(lines, this.clock.now());
       }
     } catch {
-      // 歌词拉取失败：显示歌曲信息兜底，不白屏（同样要校验序号）
-      if (mySeq === this.seq) this.target.setLines([], title);
+      // 信息行已经在视觉队列中，失败时保持它作为无歌词兜底。
     }
-    // 歌词已就绪（或兜底文案已显示）：淡入场景层（仅在仍是最新歌时）
+    // 场景保持常驻；此处不再控制整层显隐。
     if (mySeq === this.seq) this.scene.show();
   }
 
@@ -159,27 +162,24 @@ export class MusicState {
     const el = document.getElementById("offline");
     if (el) el.hidden = v;
   }
-}
 
-/**
- * 前置一行"歌曲名 - 歌手"作为前奏占位。
- * time 设为 -1，永远先于任何歌词行，因此前奏（时间早于第一句歌词）时它就是当前行，
- * 居中大字显示；第一句歌词开始后随滚动自然上移、淡出窗口。
- * 若歌词首行已自带歌名/歌手信息，则不再重复添加。
- */
-function withHeader(lines: LyricLine[], title: string, author?: string): LyricLine[] {
-  const t = title?.trim() ?? "";
-  const a = author?.trim() ?? "";
-  if (!t && !a) return lines;
-  if (firstLineCarriesSongInfo(lines, t, a)) return lines;
-  return [{ time: -1, text: [t, a].filter(Boolean).join(" - ") }, ...lines];
-}
+  /**
+   * 切歌时播放器可能有一帧短暂上报 hasSong=false；延迟确认避免把旧歌词队列
+   * 清掉。真正停止播放后才清空歌词，Canvas 背景仍保持显示。
+   */
+  private scheduleNoSongClear(): void {
+    if (this.noSongTimer !== null) return;
+    this.noSongTimer = window.setTimeout(() => {
+      this.noSongTimer = null;
+      this.clock.reset();
+      this.songKey = null;
+      this.target.clear();
+    }, 900);
+  }
 
-/** 首行是否已自带歌名/歌手信息：完全等于歌名或歌手，或同时包含两者 */
-function firstLineCarriesSongInfo(lines: LyricLine[], title: string, author: string): boolean {
-  const first = (lines[0]?.text ?? "").trim();
-  if (!first) return false;
-  if (title && first === title) return true;
-  if (author && first === author) return true;
-  return !!(title && author && first.includes(title) && first.includes(author));
+  private cancelNoSongClear(): void {
+    if (this.noSongTimer === null) return;
+    window.clearTimeout(this.noSongTimer);
+    this.noSongTimer = null;
+  }
 }

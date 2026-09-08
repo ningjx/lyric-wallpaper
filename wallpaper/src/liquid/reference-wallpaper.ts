@@ -2,6 +2,7 @@ import { LiquidGlassRenderer } from "../../vendor/liquid-glass-webgl/src/compone
 import { springStepCritical } from "../../vendor/liquid-glass-webgl/src/components/liquid-glass/renderer/spring";
 import type { GlassElementConfig } from "../../vendor/liquid-glass-webgl/src/components/liquid-glass/renderer";
 import type { LyricLine } from "../lyrics/parser";
+import { findCurrentLine } from "../lyrics/timeline";
 import type { LyricsTarget } from "../player/MusicState";
 import { BackgroundComposer, type BackgroundLayout } from "./background-composer";
 import type { PerfSnapshot } from "../../vendor/liquid-glass-webgl/src/components/liquid-glass/renderer/perf-monitor";
@@ -71,6 +72,12 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   private height = 0;
   private disposed = false;
   private lyrics: LyricLine[];
+  /** 切歌时插入到旧歌未渲染区域的新歌信息行。 */
+  private transitionHeaderIndex: number | null = null;
+  /** 异步歌词到达后用于恢复真实时间轴的完整新歌歌词。 */
+  private transitionTimeline: LyricLine[] | null = null;
+  private transitionTimelineStart = 0;
+  private transitionReleased = false;
   private settings: LiquidSettings = { ...DEFAULT_LIQUID_SETTINGS };
   private readonly textMeasure = document.createElement("canvas").getContext("2d")!;
   private readonly glyphMeasureCanvas = document.createElement("canvas");
@@ -144,6 +151,19 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
       this.songEntryOffsetY = shouldSettle ? 0 : next.current;
       this.songEntryVelocity = shouldSettle ? 0 : next.velocity;
     }
+    // 新歌歌词已到达时，不立刻按真实时间跳行；先让信息行真正落到主歌词
+    // 位置，再在下一帧把时间轴交给它后面的“当前句 + 后续句”。
+    if (
+      this.transitionHeaderIndex !== null &&
+      this.transitionTimeline !== null &&
+      !this.transitionReleased &&
+      nextActive === this.transitionHeaderIndex &&
+      Math.abs(this.scrollY - target) < LYRIC_SCROLL_SETTLE_DISTANCE &&
+      Math.abs(this.velocity) < LYRIC_SCROLL_SETTLE_VELOCITY &&
+      Math.abs(this.songEntryOffsetY) < SONG_ENTRY_SETTLE_DISTANCE
+    ) {
+      this.transitionReleased = true;
+    }
     this.commitScrollY();
     if (
       nextActive !== this.active ||
@@ -200,7 +220,27 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
 
   getLines(): readonly LyricLine[] { return this.lyrics; }
 
+  /**
+   * 视觉队列和真实歌曲时间轴并不总是一一对应：切歌期间先锁定信息行，
+   * 待它成为主歌词后才把控制权交回新歌的实际播放时间。
+   */
+  getActiveLine(time: number): number {
+    const headerIndex = this.transitionHeaderIndex;
+    if (headerIndex === null) return findCurrentLine(this.lyrics, time);
+    if (!this.transitionReleased || !this.transitionTimeline) return headerIndex;
+    const timelineIndex = findCurrentLine(this.transitionTimeline, time);
+    if (timelineIndex < this.transitionTimelineStart) return headerIndex;
+    return Math.min(
+      this.lyrics.length - 1,
+      headerIndex + 1 + timelineIndex - this.transitionTimelineStart,
+    );
+  }
+
   setLines(lines: LyricLine[], fallback = ""): void {
+    this.transitionHeaderIndex = null;
+    this.transitionTimeline = null;
+    this.transitionTimelineStart = 0;
+    this.transitionReleased = false;
     this.lyrics = lines.length > 0 ? [...lines] : fallback ? [{ time: 0, text: fallback }] : [];
     this.active = -1;
     this.scrollY = 0;
@@ -216,6 +256,63 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
 
   clear(): void {
     this.setLines([]);
+  }
+
+  /**
+   * 切歌第一阶段：保留当前可见的旧歌词和“渲染距离”内的后续行，把新歌
+   * 信息行放到第一条未渲染旧歌词的位置。这样原来的滚动弹簧可直接继续，
+   * 不需要复制旧行或叠加额外出场动画。
+   */
+  beginSong(title: string, author = ""): void {
+    const header = [title.trim(), author.trim()].filter(Boolean).join(" - ") || "未知歌曲";
+    const hadLyrics = this.lyrics.length > 0;
+    const focus = this.active < 0 ? 0 : Math.min(this.active, Math.max(0, this.lyrics.length - 1));
+    const renderWindow = Math.ceil(this.settings.lyricDepthCullDistance);
+    const insertion = hadLyrics
+      ? Math.min(this.lyrics.length, focus + renderWindow + 1)
+      : 0;
+    this.lyrics = [
+      ...this.lyrics.slice(0, insertion),
+      { time: Number.POSITIVE_INFINITY, text: header },
+    ];
+    this.transitionHeaderIndex = insertion;
+    this.transitionTimeline = null;
+    this.transitionTimelineStart = 0;
+    this.transitionReleased = false;
+    if (!hadLyrics) {
+      this.active = -1;
+      this.scrollY = 0;
+      this.velocity = 0;
+      this.songEntryOffsetY = this.songEntryDistance();
+      this.songEntryVelocity = 0;
+      this.hasPositioned = false;
+      this.scrollRenderGate.reset();
+    }
+    this.rebuild(hadLyrics ? focus : 0, hadLyrics ? this.scrollY / this.rowGap() : 0);
+    this.lastLayoutScrollY = this.scrollY;
+    this.renderer.markAllDirty();
+    this.renderer.requestRender();
+  }
+
+  /**
+   * 切歌第二阶段：只接入当前播放句及其后续歌词。前面已经错过的句子不再
+   * 插回队列，避免异步响应到达时从信息行突然跳到很远的位置。
+   */
+  resolveSongLyrics(lines: LyricLine[], position: number): void {
+    const headerIndex = this.transitionHeaderIndex;
+    if (headerIndex === null || lines.length === 0) return;
+    const timeline = [...lines];
+    const current = findCurrentLine(timeline, position);
+    const start = Math.max(0, current);
+    const suffix = timeline.slice(start);
+    if (suffix.length === 0) return;
+    this.lyrics.splice(headerIndex + 1, 0, ...suffix);
+    this.transitionTimeline = timeline;
+    this.transitionTimelineStart = start;
+    this.transitionReleased = false;
+    this.rebuild(this.active < 0 ? headerIndex : this.active, this.scrollY / this.rowGap());
+    this.renderer.markAllDirty();
+    this.renderer.requestRender();
   }
 
   setSettings(patch: Partial<LiquidSettings>): void {

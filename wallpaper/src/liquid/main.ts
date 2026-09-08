@@ -118,11 +118,14 @@ async function boot(): Promise<void> {
     wallpaper.setSettings(wallpaperSettings.liquid);
     wallpaper.setPerformanceMonitoring(performanceEnabled);
     syncBackgroundSlideshow();
+    // Canvas 是壁纸本体，必须始终可见；无歌时仅 renderer 的元素列表为空。
+    // 不能等待歌词请求完成后再淡入，否则切歌期间会短暂露出 body 的黑底。
+    const sceneController = new SceneController(scene);
+    sceneController.show();
     if (previewMode) {
-      new SceneController(scene).show();
     } else {
       clock = new SyncClock();
-      musicState = new MusicState(new NowPlayingApi(), clock, wallpaper, new SceneController(scene));
+      musicState = new MusicState(new NowPlayingApi(), clock, wallpaper, sceneController);
       musicState.setPollInterval(wallpaperSettings.pollIntervalMs);
       musicState.start();
     }
@@ -171,7 +174,7 @@ function exposePerformanceProbe(): void {
 }
 
 function findCurrentLineForWallpaper(time: number): number {
-  return wallpaper ? findCurrentLine(wallpaper.getLines(), time) : 0;
+  return wallpaper ? wallpaper.getActiveLine(time) : 0;
 }
 
 void boot();
