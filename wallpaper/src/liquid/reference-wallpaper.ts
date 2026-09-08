@@ -17,6 +17,15 @@ const SONG_ENTRY_SPEED = 4.4;
 const WALLPAPER_SOURCE = `${import.meta.env.BASE_URL}backgrounds/wallhaven-vpolwm.jpg`;
 const RENDERER_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
+/**
+ * 屏幕实际消费的单向歌词总线。spacer 占用行距但不产生任何渲染元素；它让
+ * 新内容能在同一条轨道上从下方追赶，而不需要为特定歌词附加像素偏移。
+ */
+type VisualTrackItem =
+  | { kind: "lyric"; line: LyricLine }
+  | { kind: "song-header"; text: string }
+  | { kind: "spacer" };
+
 export interface LiquidSettings {
   lyricFontScale: number; lyricGlassPadding: number; lyricGap: number; lyricVerticalOffset: number; lyricScrollSpeed: number;
   lyricOffsetX: number; lyricOffsetY: number; lyricAlignment: 0 | 1 | 2;
@@ -71,12 +80,13 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   private width = 0;
   private height = 0;
   private disposed = false;
-  private lyrics: LyricLine[];
+  private track: VisualTrackItem[];
   /** 切歌时插入到旧歌未渲染区域的新歌信息行。 */
   private transitionHeaderIndex: number | null = null;
   /** 异步歌词到达后用于恢复真实时间轴的完整新歌歌词。 */
   private transitionTimeline: LyricLine[] | null = null;
   private transitionTimelineStart = 0;
+  private transitionFirstLyricIndex: number | null = null;
   private transitionReleased = false;
   private settings: LiquidSettings = { ...DEFAULT_LIQUID_SETTINGS };
   private readonly textMeasure = document.createElement("canvas").getContext("2d")!;
@@ -90,7 +100,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     canvas: HTMLCanvasElement,
     initialLyrics: readonly LyricLine[],
   ) {
-    this.lyrics = [...initialLyrics];
+    this.track = initialLyrics.map((line) => ({ kind: "lyric", line }));
     this.renderer = new LiquidGlassRenderer(canvas);
     this.renderer.dpr = Math.min(devicePixelRatio || 1, this.settings.dpr);
     this.renderer.usePerElementFbo = true;
@@ -115,14 +125,14 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
 
   draw(seconds: number, active: number): void {
     if (this.disposed) return;
-    if (this.lyrics.length === 0) {
+    if (this.track.length === 0) {
       this.renderer.render();
       return;
     }
     const delta = this.lastFrame ? Math.min(.08, Math.max(0, seconds - this.lastFrame)) : .016;
     this.lastFrame = seconds;
     const rowGap = this.rowGap();
-    const nextActive = Math.max(0, Math.min(active, this.lyrics.length - 1));
+    const nextActive = Math.max(0, Math.min(active, this.track.length - 1));
     const target = nextActive * rowGap;
     if (!this.hasPositioned) {
       this.scrollY = target;
@@ -218,7 +228,9 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     return Math.min(2.5, Math.max(.2, duration + .03));
   }
 
-  getLines(): readonly LyricLine[] { return this.lyrics; }
+  getLines(): readonly LyricLine[] {
+    return this.track.flatMap((item) => item.kind === "lyric" ? [item.line] : []);
+  }
 
   /**
    * 视觉队列和真实歌曲时间轴并不总是一一对应：切歌期间先锁定信息行，
@@ -226,13 +238,13 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
    */
   getActiveLine(time: number): number {
     const headerIndex = this.transitionHeaderIndex;
-    if (headerIndex === null) return findCurrentLine(this.lyrics, time);
+    if (headerIndex === null) return findCurrentLine(this.getLines(), time);
     if (!this.transitionReleased || !this.transitionTimeline) return headerIndex;
     const timelineIndex = findCurrentLine(this.transitionTimeline, time);
     if (timelineIndex < this.transitionTimelineStart) return headerIndex;
     return Math.min(
-      this.lyrics.length - 1,
-      headerIndex + 1 + timelineIndex - this.transitionTimelineStart,
+      this.track.length - 1,
+      (this.transitionFirstLyricIndex ?? headerIndex) + timelineIndex - this.transitionTimelineStart,
     );
   }
 
@@ -240,12 +252,14 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     this.transitionHeaderIndex = null;
     this.transitionTimeline = null;
     this.transitionTimelineStart = 0;
+    this.transitionFirstLyricIndex = null;
     this.transitionReleased = false;
-    this.lyrics = lines.length > 0 ? [...lines] : fallback ? [{ time: 0, text: fallback }] : [];
+    const source = lines.length > 0 ? lines : fallback ? [{ time: 0, text: fallback }] : [];
+    this.track = source.map((line) => ({ kind: "lyric", line }));
     this.active = -1;
     this.scrollY = 0;
     this.velocity = 0;
-    this.songEntryOffsetY = this.lyrics.length > 0 ? this.songEntryDistance() : 0;
+    this.songEntryOffsetY = this.track.length > 0 ? this.songEntryDistance() : 0;
     this.songEntryVelocity = 0;
     this.hasPositioned = false;
     this.scrollRenderGate.reset();
@@ -260,35 +274,39 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
 
   /**
    * 切歌第一阶段：保留当前可见的旧歌词和“渲染距离”内的后续行，把新歌
-   * 信息行放到第一条未渲染旧歌词的位置。这样原来的滚动弹簧可直接继续，
-   * 不需要复制旧行或叠加额外出场动画。
+   * 信息行放到第一条未渲染旧歌词之后的视觉轨道中。spacer 也属于轨道，
+   * 因而裁剪、深度、滚动目标始终使用同一套索引坐标。
    */
   beginSong(title: string, author = ""): void {
     const header = [title.trim(), author.trim()].filter(Boolean).join(" - ") || "未知歌曲";
-    const hadLyrics = this.lyrics.length > 0;
-    const focus = this.active < 0 ? 0 : Math.min(this.active, Math.max(0, this.lyrics.length - 1));
+    const hadTrack = this.track.length > 0;
+    const focus = this.active < 0 ? 0 : Math.min(this.active, Math.max(0, this.track.length - 1));
     const renderWindow = Math.ceil(this.settings.lyricDepthCullDistance);
-    const insertion = hadLyrics
-      ? Math.min(this.lyrics.length, focus + renderWindow + 1)
+    const insertion = hadTrack
+      ? Math.min(this.track.length, focus + renderWindow + 1)
       : 0;
-    this.lyrics = [
-      ...this.lyrics.slice(0, insertion),
-      { time: Number.POSITIVE_INFINITY, text: header },
+    const spacerCount = this.entranceSpacerCount(insertion - focus);
+    this.track = [
+      ...this.track.slice(0, insertion),
+      ...Array.from({ length: spacerCount }, () => ({ kind: "spacer" as const })),
+      { kind: "song-header", text: header },
     ];
-    this.transitionHeaderIndex = insertion;
+    this.transitionHeaderIndex = insertion + spacerCount;
     this.transitionTimeline = null;
     this.transitionTimelineStart = 0;
+    this.transitionFirstLyricIndex = null;
     this.transitionReleased = false;
-    if (!hadLyrics) {
-      this.active = -1;
+    if (!hadTrack) {
+      this.active = 0;
       this.scrollY = 0;
       this.velocity = 0;
-      this.songEntryOffsetY = this.songEntryDistance();
+      this.songEntryOffsetY = 0;
       this.songEntryVelocity = 0;
-      this.hasPositioned = false;
+      // 总线 spacer 已经把标题放到屏幕下方；保持当前位置，由弹簧追赶。
+      this.hasPositioned = true;
       this.scrollRenderGate.reset();
     }
-    this.rebuild(hadLyrics ? focus : 0, hadLyrics ? this.scrollY / this.rowGap() : 0);
+    this.rebuild(hadTrack ? focus : 0, hadTrack ? this.scrollY / this.rowGap() : 0);
     this.lastLayoutScrollY = this.scrollY;
     this.renderer.markAllDirty();
     this.renderer.requestRender();
@@ -306,9 +324,17 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     const start = Math.max(0, current);
     const suffix = timeline.slice(start);
     if (suffix.length === 0) return;
-    this.lyrics.splice(headerIndex + 1, 0, ...suffix);
+    const spacerCount = this.entranceSpacerCount(1) - 1;
+    const firstLyricIndex = headerIndex + 1 + spacerCount;
+    this.track.splice(
+      headerIndex + 1,
+      0,
+      ...Array.from({ length: spacerCount }, () => ({ kind: "spacer" as const })),
+      ...suffix.map((line) => ({ kind: "lyric" as const, line })),
+    );
     this.transitionTimeline = timeline;
     this.transitionTimelineStart = start;
+    this.transitionFirstLyricIndex = firstLyricIndex;
     this.transitionReleased = false;
     this.rebuild(this.active < 0 ? headerIndex : this.active, this.scrollY / this.rowGap());
     this.renderer.markAllDirty();
@@ -352,31 +378,34 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
 
   private rebuild(active: number, focus = active): void {
     if (!this.width || !this.height) return;
-    if (this.lyrics.length === 0) {
+    if (this.track.length === 0) {
       this.renderer.setElements([]);
       this.renderer.setContentHeight(this.height);
       return;
     }
-    this.active = Math.max(0, Math.min(active, this.lyrics.length - 1));
+    this.active = Math.max(0, Math.min(active, this.track.length - 1));
     const rowGap = this.rowGap();
     const centerY = this.height / 2;
     const rows: GlassElementConfig[] = [];
     const renderWindow = Math.ceil(this.settings.lyricDepthCullDistance);
     const first = Math.max(0, Math.floor(focus - renderWindow));
-    const last = Math.min(this.lyrics.length - 1, Math.ceil(focus + renderWindow));
+    const last = Math.min(this.track.length - 1, Math.ceil(focus + renderWindow));
     for (let index = first; index <= last; index++) {
+      const item = this.track[index];
+      if (item.kind === "spacer") continue;
       const distance = Math.abs(index - focus);
       const scale = this.depthScale(distance);
       const alpha = this.depthAlpha(distance);
       const glassStrength = this.depthGlassStrength(alpha);
-      const typography = this.fitTypography(this.lyrics[index].text, 700, scale);
+      const text = item.kind === "lyric" ? item.line.text : item.text;
+      const typography = this.fitTypography(text, 700, scale);
       const rect = this.lyricRect(index, centerY, rowGap, typography);
       const textRect = { ...rect, y: rect.y + typography.opticalOffset + this.settings.lyricVerticalOffset };
       const textRow: GlassElementConfig = {
         ...this.base(`lyric-${index}`, "text", textRect),
         scroll: true,
         text: {
-          content: this.lyrics[index].text,
+          content: text,
           color: [0.94, 0.985, 1, alpha],
           fontSizePx: typography.fontSize,
           fontWeight: 700,
@@ -391,7 +420,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
       else rows.push(glassRow, textRow);
     }
     this.renderer.setElements(rows);
-    this.renderer.setContentHeight(this.height + Math.max(0, this.lyrics.length - 1) * rowGap);
+    this.renderer.setContentHeight(this.height + Math.max(0, this.track.length - 1) * rowGap);
     this.commitScrollY();
   }
 
@@ -457,6 +486,18 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
 
   private songEntryDistance(): number {
     return Math.max(this.height * .72, this.rowGap() * 1.4);
+  }
+
+  /**
+   * 计算在已有轨道距离之后还需要多少个无渲染行，保证追赶者从屏幕下方
+   * 进入。空间层次的渲染距离也参与下限，避免新内容刚插入就落进可见窗口。
+   */
+  private entranceSpacerCount(existingDistance: number): number {
+    const rowGap = this.rowGap();
+    const lyricCenterY = this.height / 2 + this.settings.lyricOffsetY;
+    const rowsBelowViewport = Math.ceil(Math.max(0, this.height - lyricCenterY) / rowGap) + 1;
+    const renderDistance = Math.ceil(this.settings.lyricDepthCullDistance) + 1;
+    return Math.max(0, Math.max(rowsBelowViewport, renderDistance) - existingDistance);
   }
 
   private depthScale(distance: number): number {
