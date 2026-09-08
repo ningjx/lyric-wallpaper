@@ -109,3 +109,10 @@ git push origin v0.0.4
 - 壁纸始终请求 `127.0.0.1:9863`；修改服务端端口时需同步修改前端 API 配置。
 
 服务端端点、配置和诊断方式请阅读 [server/README.md](server/README.md)。
+
+## 鸣谢
+
+- [Widdit/now-playing-service](https://github.com/Widdit/now-playing-service)：歌曲播放状态检测、歌词服务设计的参考来源；其代码以 MIT License 发布。
+- [martin65536/liquid-glass-webgl](https://github.com/martin65536/liquid-glass-webgl)：本项目液态玻璃 WebGL 渲染器的上游实现；其代码以 Apache License 2.0 发布。本项目使用并维护其 fork 中的适配版本。
+
+本项目以 [Apache License 2.0](LICENSE) 发布；上游项目的版权与许可证声明仍分别适用于其对应代码。
