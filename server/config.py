@@ -8,21 +8,48 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field, fields
+import sys
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SERVER_DIR)
+APP_NAME = "LyricServer"
+
+
+def is_packaged() -> bool:
+    """是否运行在 PyInstaller 等冻结后的发布包中。"""
+    return bool(getattr(sys, "frozen", False))
+
+
+def user_data_dir() -> str:
+    """发布版的可写数据目录，不向 EXE 所在目录或临时解压目录写缓存。"""
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    return os.path.join(base, APP_NAME)
 
 
 def _default_data_dir() -> str:
-    """歌词/缓存数据目录（仓库内 data/，便于用户手工放置 .lrc）。"""
+    """歌词/缓存目录：源码版在仓库内，发布版在用户本地数据目录。"""
+    if is_packaged():
+        return user_data_dir()
     return os.path.join(PROJECT_DIR, "data")
+
+
+def default_config_path() -> str | None:
+    """发布版自动读取用户配置；源码版仍只按显式 --config 读取。"""
+    return os.path.join(user_data_dir(), "config.json") if is_packaged() else None
+
+
+def desktop_config_path() -> str:
+    """桌面版始终使用用户目录配置，源码 CLI 不受影响。"""
+    return os.path.join(user_data_dir(), "config.json")
 
 
 @dataclass
 class MusicSourceConfig:
     """数据源通用参数。"""
+    enable_netease: bool = True
+    enable_apple: bool = True
     netease_poll_interval: float = 0.2   # 网易云内存读取周期（秒）
     apple_poll_interval: float = 0.2     # Apple SMTC 读取周期（秒）
     title_recheck_interval: float = 30.0 # 窗口标题兜底重查周期（秒）
@@ -111,6 +138,7 @@ def config_from_dict(data: dict) -> ServerConfig:
 
 def load_config(path: str | None = None) -> ServerConfig:
     cfg = ServerConfig()
+    path = path or default_config_path()
     if path and os.path.isfile(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -121,3 +149,14 @@ def load_config(path: str | None = None) -> ServerConfig:
             from .console import console
             console.log(f"读取配置文件失败（使用默认值）: {e}")
     return cfg
+
+
+def save_config(cfg: ServerConfig, path: str) -> None:
+    """原子写入桌面版配置，避免进程中断留下半个 JSON 文件。"""
+    target = os.path.abspath(path)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    temp = target + ".tmp"
+    with open(temp, "w", encoding="utf-8") as f:
+        json.dump(asdict(cfg), f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(temp, target)

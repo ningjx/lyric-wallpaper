@@ -17,17 +17,19 @@ from .netease import NeteaseSource
 def build_sources(config: ServerConfig,
                   publish: Callable[[str, RawSnapshot], None]
                   ) -> Dict[str, PlayerSource]:
-    return {
-        "netease": NeteaseSource(
+    sources: Dict[str, PlayerSource] = {}
+    if config.music.enable_netease:
+        sources["netease"] = NeteaseSource(
             lambda snap: publish("netease", snap),
             interval=config.music.netease_poll_interval,
             title_recheck=config.music.title_recheck_interval,
-        ),
-        "applemusic": AppleMusicSource(
+        )
+    if config.music.enable_apple:
+        sources["applemusic"] = AppleMusicSource(
             lambda name, snap: publish(name, snap),
             interval=config.music.apple_poll_interval,
-        ),
-    }
+        )
+    return sources
 
 
 def start_all(sources: Dict[str, PlayerSource]) -> None:

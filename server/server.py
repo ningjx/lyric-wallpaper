@@ -16,6 +16,7 @@ import asyncio
 import logging
 import os
 import sys
+from collections.abc import Callable
 
 from aiohttp import web
 
@@ -83,11 +84,16 @@ def setup_file_logging(cfg: ServerConfig) -> None:
     """非 TTY 场景把日志写到文件（控制台仍保留状态行）。"""
     if not cfg.http.log_file:
         return
-    handler = logging.FileHandler(cfg.http.log_file, encoding="utf-8")
+    target = os.path.abspath(cfg.http.log_file)
+    root = logging.getLogger()
+    if any(isinstance(h, logging.FileHandler) and h.baseFilename == target
+           for h in root.handlers):
+        return
+    handler = logging.FileHandler(target, encoding="utf-8")
     handler.setFormatter(logging.Formatter(
         "%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    logging.getLogger().addHandler(handler)
-    logging.getLogger().setLevel(logging.INFO)
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
 
 
 def build_lyrics_chain(cfg: ServerConfig, http: HttpClient) -> LyricsChain:
@@ -107,8 +113,20 @@ def build_lyrics_chain(cfg: ServerConfig, http: HttpClient) -> LyricsChain:
         parallel=cfg.lyrics.parallel)
 
 
-async def serve(cfg: ServerConfig) -> None:
+async def serve(
+    cfg: ServerConfig,
+    stop_event: asyncio.Event | None = None,
+    *,
+    on_started: Callable[[], None] | None = None,
+    console_status: bool = True,
+) -> None:
+    """运行服务直到 ``stop_event`` 被置位。
+
+    CLI 不传 ``stop_event`` 时保持原来的 Ctrl+C 行为；托盘程序则持有该
+    Event，从而可以在不杀进程的情况下优雅停止和重启同一套服务核心。
+    """
     console.set_window_title(CONSOLE_TITLE)
+    stop_event = stop_event or asyncio.Event()
     loop = asyncio.get_running_loop()
     metrics = Metrics()
     arbiter = Arbiter(priority=cfg.source_priority,
@@ -183,7 +201,8 @@ async def serve(cfg: ServerConfig) -> None:
                     f"{sec_to_human(res.progress)}/{sec_to_human(res.duration)}")
             await asyncio.sleep(0.5)
 
-    status_task = asyncio.create_task(_console_status_loop())
+    status_task = (asyncio.create_task(_console_status_loop())
+                   if console_status else None)
 
     # ---- 数据源（工作线程 → 事件循环桥） ----
     def publish(name: str, snap) -> None:
@@ -207,9 +226,12 @@ async def serve(cfg: ServerConfig) -> None:
         console.log("  数据源: Apple Music SMTC / 网易云内存读取")
         console.log("按 Ctrl+C 停止")
 
-        await asyncio.Event().wait()
+        if on_started is not None:
+            on_started()
+        await stop_event.wait()
     finally:
-        status_task.cancel()
+        if status_task is not None:
+            status_task.cancel()
         stop_all(sources)
         if runner is not None:
             await runner.cleanup()

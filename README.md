@@ -58,14 +58,16 @@
 
 ## 快速开始
 
-### 1. 选择并启动播放状态服务
+### 1. 启动播放状态服务
+
+推荐从 [Releases](https://github.com/ningjx/lyric-wallpaper/releases) 下载并直接运行 `LyricServer.exe`：无需安装 Python，也无需安装程序。启动后会显示在系统托盘，并自动在 `127.0.0.1:9863` 为壁纸提供数据；配置、缓存和日志保存在 `%LOCALAPPDATA%\LyricServer\`。
 
 壁纸兼容 Now Playing API 的 `GET /query` 与 `GET /api/lyric`，默认访问 `http://127.0.0.1:9863`。两种服务任选其一即可，**不需要同时运行**：
 
-- **本仓库服务（推荐用于网易云音乐）**：使用进程内存读取进度，适合最小化或桌面歌词模式下仍需准确同步的场景。
+- **LyricServer.exe（推荐用于网易云音乐）**：使用进程内存读取进度，适合最小化或桌面歌词模式下仍需准确同步的场景。
 - **[Widdit/now-playing-service](https://github.com/Widdit/now-playing-service)**：可直接安装、启动并作为壁纸的数据源；壁纸会自动降级为轮询模式，核心播放状态和歌词功能不受影响。
 
-#### 使用本仓库服务
+#### 源码命令行模式（开发或排障）
 
 在仓库根目录执行：
 

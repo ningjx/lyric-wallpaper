@@ -6,6 +6,8 @@ demo.html
 
 # 壁纸构建产物（不入库，由 GitHub Actions 打 tag 时自动构建发布）
 dist/
+release/
+.build/
 
 # Python（服务端）
 __pycache__/

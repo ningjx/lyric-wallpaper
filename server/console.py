@@ -59,11 +59,16 @@ class Console:
         self._cursor_hidden = False
         self._window_title = ""
         # 非交互（重定向到文件）时不启用原地刷新，避免输出控制字符
-        self._tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+        self._tty = bool(sys.stdout and hasattr(sys.stdout, "isatty") and sys.stdout.isatty())
 
     def _raw(self, text: str):
-        sys.stdout.write(text)
-        sys.stdout.flush()
+        # PyInstaller --windowed 下 stdout/stderr 可能为 None；服务仍应继续
+        # 运行，日志会由 desktop.py 配置到用户日志目录。
+        out = sys.stdout
+        if out is None:
+            return
+        out.write(text)
+        out.flush()
 
     def set_window_title(self, title: str) -> None:
         """更新 Windows 控制台/终端标签标题。"""
