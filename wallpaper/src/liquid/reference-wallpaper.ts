@@ -44,26 +44,20 @@ export interface LiquidSettings {
 }
 
 export const DEFAULT_LIQUID_SETTINGS: LiquidSettings = {
-  lyricFontScale: .68, lyricGlassPadding: 20, lyricGap: 83, lyricVerticalOffset: 0, lyricScrollSpeed: 5.5,
+  lyricFontScale: .87, lyricGlassPadding: 17, lyricGap: 83, lyricVerticalOffset: 0, lyricScrollSpeed: 5.5,
   lyricOffsetX: 0, lyricOffsetY: -115, lyricAlignment: 0,
   lyricDepthMinScale: .61, lyricDepthScaleFalloff: .55, lyricDepthScaleCurve: 1.63,
-  lyricDepthAlphaFalloff: .65, lyricDepthAlphaCurve: 1.12, lyricDepthGlassFloor: .15, lyricDepthCullDistance: 2,
-  backgroundImage: "", backgroundDirectory: "", backgroundIntervalSeconds: 300,
+  lyricDepthAlphaFalloff: .65, lyricDepthAlphaCurve: 1.12, lyricDepthGlassFloor: .15, lyricDepthCullDistance: 3,
+  backgroundImage: "", backgroundDirectory: "", backgroundIntervalSeconds: 60,
   backgroundLayout: 0, backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0,
-  cornerRadius: 45, refractionHeight: 4, refractionAmount: -34, blurRadius: 0, lyricBehindGlass: false,
-  saturation: 1.35, brightness: 0, contrast: 1, depthEffect: true, chromaticAberration: false,
+  cornerRadius: 35, refractionHeight: 11, refractionAmount: -44, blurRadius: 0, lyricBehindGlass: false,
+  saturation: 1.13, brightness: 0, contrast: 1, depthEffect: true, chromaticAberration: false,
   tintColor: [.18, .52, .72], tintAlpha: 0, surfaceColor: [.80, .94, 1], surfaceAlpha: 0,
   highlight: true, highlightMode: 0, highlightColor: [.72, .92, 1], highlightAlpha: .34, highlightAngle: -1.98, highlightFalloff: 2.1, highlightWidth: 1,
-  shadow: true, shadowColor: [.01, .06, .12], shadowAlpha: .18, shadowRadius: 28, shadowOffsetX: 0, shadowOffsetY: 16,
-  separableBlur: false, continuousCorners: false, directBackdrop: true,
+  shadow: false, shadowColor: [.01, .06, .12], shadowAlpha: .18, shadowRadius: 28, shadowOffsetX: 0, shadowOffsetY: 16,
+  separableBlur: true, continuousCorners: false, directBackdrop: true,
   dpr: 1, blurTapCap: 9, blurDownsample: 2, kawaseBlur: true, blurCache: true, perElementFbo: true,
 };
-
-/**
- * \"高质量全场模糊\"只是切换模糊算法；半径为 0 时两条路径都会刻意跳过
- * 模糊。首次启用该选项时提供一个保守的可见值，避免开关看起来没有生效。
- */
-export const DEFAULT_SEPARABLE_BLUR_RADIUS = 12;
 
 export class ReferenceLyricsWallpaper implements LyricsTarget {
   private readonly renderer: LiquidGlassRenderer;
@@ -357,21 +351,11 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   }
 
   setSettings(patch: Partial<LiquidSettings>): void {
-    // Wallpaper Engine 的属性回调通常只包含刚变化的字段。高质量开关的
-    // 默认半径又是 0，若不补齐一个可见半径，用户仅勾选开关会得到完全相同
-    // 的画面。显式传入 blurRadius（包括 0）始终优先，因而仍可手动关闭模糊。
     const nextPatch = { ...patch };
     // 渲染窗口按歌词“行”计数，实际也以整数行构建；兼容旧版保存的
     // 小数值时归一化，避免 1.01 与 1.99 都被 ceil 成 2 行却显示不同数值。
     if (nextPatch.lyricDepthCullDistance !== undefined) {
       nextPatch.lyricDepthCullDistance = Math.max(1, Math.min(6, Math.round(nextPatch.lyricDepthCullDistance)));
-    }
-    if (
-      patch.separableBlur === true &&
-      patch.blurRadius === undefined &&
-      this.settings.blurRadius < .5
-    ) {
-      nextPatch.blurRadius = DEFAULT_SEPARABLE_BLUR_RADIUS;
     }
     // 使用变更前的行距保留当前滚动位置对应的歌词序号。否则调节行距时会
     // 用新行距除旧 scrollY，造成焦点跳行，掩盖了行距本身的视觉变化。

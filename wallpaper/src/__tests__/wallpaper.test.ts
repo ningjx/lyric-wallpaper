@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_SEPARABLE_BLUR_RADIUS } from "../liquid/reference-wallpaper";
 import { setupWallpaperEnvironment, type WallpaperSettings } from "../wallpaper";
 
 describe("Wallpaper Engine property bridge", () => {
@@ -7,7 +6,7 @@ describe("Wallpaper Engine property bridge", () => {
     delete (globalThis as { window?: unknown }).window;
   });
 
-  it("enabling high-quality blur supplies a visible radius unless the user also set one", () => {
+  it("enabling high-quality blur preserves the configured blur radius", () => {
     const fakeWindow: Record<string, unknown> = {};
     (globalThis as { window: Record<string, unknown> }).window = fakeWindow;
     let received: WallpaperSettings | undefined;
@@ -20,7 +19,7 @@ describe("Wallpaper Engine property bridge", () => {
     };
     listener.applyUserProperties({ separableblur: { value: true } });
     expect(received?.liquid.separableBlur).toBe(true);
-    expect(received?.liquid.blurRadius).toBe(DEFAULT_SEPARABLE_BLUR_RADIUS);
+    expect(received?.liquid.blurRadius).toBe(0);
 
     listener.applyUserProperties({ blurradius: { value: 0 } });
     expect(received?.liquid.blurRadius).toBe(0);
