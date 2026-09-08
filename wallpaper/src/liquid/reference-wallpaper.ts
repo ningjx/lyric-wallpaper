@@ -47,7 +47,7 @@ export const DEFAULT_LIQUID_SETTINGS: LiquidSettings = {
   lyricFontScale: .68, lyricGlassPadding: 20, lyricGap: 83, lyricVerticalOffset: 0, lyricScrollSpeed: 5.5,
   lyricOffsetX: 0, lyricOffsetY: -115, lyricAlignment: 0,
   lyricDepthMinScale: .61, lyricDepthScaleFalloff: .55, lyricDepthScaleCurve: 1.63,
-  lyricDepthAlphaFalloff: .65, lyricDepthAlphaCurve: 1.12, lyricDepthGlassFloor: .15, lyricDepthCullDistance: 1.5,
+  lyricDepthAlphaFalloff: .65, lyricDepthAlphaCurve: 1.12, lyricDepthGlassFloor: .15, lyricDepthCullDistance: 2,
   backgroundImage: "", backgroundDirectory: "", backgroundIntervalSeconds: 300,
   backgroundLayout: 0, backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0,
   cornerRadius: 45, refractionHeight: 4, refractionAmount: -34, blurRadius: 0, lyricBehindGlass: false,
@@ -361,6 +361,11 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     // 默认半径又是 0，若不补齐一个可见半径，用户仅勾选开关会得到完全相同
     // 的画面。显式传入 blurRadius（包括 0）始终优先，因而仍可手动关闭模糊。
     const nextPatch = { ...patch };
+    // 渲染窗口按歌词“行”计数，实际也以整数行构建；兼容旧版保存的
+    // 小数值时归一化，避免 1.01 与 1.99 都被 ceil 成 2 行却显示不同数值。
+    if (nextPatch.lyricDepthCullDistance !== undefined) {
+      nextPatch.lyricDepthCullDistance = Math.max(1, Math.min(6, Math.round(nextPatch.lyricDepthCullDistance)));
+    }
     if (
       patch.separableBlur === true &&
       patch.blurRadius === undefined &&

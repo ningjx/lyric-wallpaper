@@ -1,7 +1,7 @@
 # 壁纸性能优化方案
 
 > 版本：v1 · 2026-09-07
-> 状态：Stage 0、Stage 1 已完成；Stage 2 因当前 renderer 的不透明场景依赖而暂缓；Stage 5 已取消
+> 状态：Stage 0、Stage 1、Stage 4 已完成；Stage 2 因当前 renderer 的不透明场景依赖而暂缓；Stage 5 已取消
 > 范围：`wallpaper/src/liquid/` 与其渲染器适配层
 > 约束：不降低默认视觉效果、不改变歌词同步与配置属性语义、不迁移 WebGL 版本。
 

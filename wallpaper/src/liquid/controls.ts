@@ -28,7 +28,7 @@ const groups: Array<{ title: string; controls: Control[] }> = [
     { key: "lyricDepthAlphaFalloff", label: "淡出衰减", kind: "range", min: .05, max: 2, step: .01 },
     { key: "lyricDepthAlphaCurve", label: "淡出曲线", kind: "range", min: .5, max: 4, step: .01 },
     { key: "lyricDepthGlassFloor", label: "远处玻璃保留", kind: "range", min: 0, max: 1, step: .01 },
-    { key: "lyricDepthCullDistance", label: "渲染距离", kind: "range", min: 1, max: 6, step: .1 },
+    { key: "lyricDepthCullDistance", label: "渲染距离（行）", kind: "range", min: 1, max: 6, step: 1 },
   ] },
   { title: "光学", controls: [
     { key: "refractionHeight", label: "折射高度", kind: "range", min: 0, max: 56, step: 1 },
@@ -43,9 +43,9 @@ const groups: Array<{ title: string; controls: Control[] }> = [
   ] },
   { title: "材质", controls: [
     { key: "tintColor", label: "染色", kind: "color" },
-    { key: "tintAlpha", label: "染色不透明度", kind: "range", min: 0, max: .6, step: .005 },
+    { key: "tintAlpha", label: "染色不透明度", kind: "range", min: 0, max: .6, step: .01 },
     { key: "surfaceColor", label: "表面色", kind: "color" },
-    { key: "surfaceAlpha", label: "表面不透明度", kind: "range", min: 0, max: .6, step: .005 },
+    { key: "surfaceAlpha", label: "表面不透明度", kind: "range", min: 0, max: .6, step: .01 },
   ] },
   { title: "高光", controls: [
     { key: "highlight", label: "启用高光", kind: "checkbox" },
