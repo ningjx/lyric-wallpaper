@@ -88,6 +88,9 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   private transitionTimelineStart = 0;
   private transitionFirstLyricIndex: number | null = null;
   private transitionReleased = false;
+  /** 用于识别同一首歌从末尾回到开头的单曲循环回绕。 */
+  private lastTimelineTime = Number.NaN;
+  private loopCycleActive = false;
   private settings: LiquidSettings = { ...DEFAULT_LIQUID_SETTINGS };
   private readonly textMeasure = document.createElement("canvas").getContext("2d")!;
   private readonly glyphMeasureCanvas = document.createElement("canvas");
@@ -240,8 +243,14 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     const headerIndex = this.transitionHeaderIndex;
     if (headerIndex === null) return findCurrentLine(this.getLines(), time);
     if (!this.transitionReleased || !this.transitionTimeline) return headerIndex;
+    this.appendLoopCycleIfNeeded(time);
     const timelineIndex = findCurrentLine(this.transitionTimeline, time);
-    if (timelineIndex < this.transitionTimelineStart) return headerIndex;
+    if (timelineIndex < this.transitionTimelineStart) {
+      return this.loopCycleActive
+        ? (this.transitionFirstLyricIndex ?? headerIndex)
+        : headerIndex;
+    }
+    this.loopCycleActive = false;
     return Math.min(
       this.track.length - 1,
       (this.transitionFirstLyricIndex ?? headerIndex) + timelineIndex - this.transitionTimelineStart,
@@ -254,6 +263,8 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     this.transitionTimelineStart = 0;
     this.transitionFirstLyricIndex = null;
     this.transitionReleased = false;
+    this.lastTimelineTime = Number.NaN;
+    this.loopCycleActive = false;
     const source = lines.length > 0 ? lines : fallback ? [{ time: 0, text: fallback }] : [];
     this.track = source.map((line) => ({ kind: "lyric", line }));
     this.active = -1;
@@ -296,6 +307,8 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     this.transitionTimelineStart = 0;
     this.transitionFirstLyricIndex = null;
     this.transitionReleased = false;
+    this.lastTimelineTime = Number.NaN;
+    this.loopCycleActive = false;
     if (!hadTrack) {
       this.active = 0;
       this.scrollY = 0;
@@ -336,6 +349,8 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     this.transitionTimelineStart = start;
     this.transitionFirstLyricIndex = firstLyricIndex;
     this.transitionReleased = false;
+    this.lastTimelineTime = Number.NaN;
+    this.loopCycleActive = false;
     this.rebuild(this.active < 0 ? headerIndex : this.active, this.scrollY / this.rowGap());
     this.renderer.markAllDirty();
     this.renderer.requestRender();
@@ -498,6 +513,29 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
     const rowsBelowViewport = Math.ceil(Math.max(0, this.height - lyricCenterY) / rowGap) + 1;
     const renderDistance = Math.ceil(this.settings.lyricDepthCullDistance) + 1;
     return Math.max(0, Math.max(rowsBelowViewport, renderDistance) - existingDistance);
+  }
+
+  /**
+   * 单曲循环时播放器时间会从末尾跳回接近 0。不要把滚动目标重设为现有
+   * 队列的开头；把下一轮歌词追加到轨道尾部，第一句自然从上一轮末句下方
+   * 继续追赶上来。
+   */
+  private appendLoopCycleIfNeeded(time: number): void {
+    const timeline = this.transitionTimeline;
+    if (!timeline || timeline.length === 0) return;
+    const previous = this.lastTimelineTime;
+    this.lastTimelineTime = time;
+    if (!Number.isFinite(previous)) return;
+    const firstTime = timeline[0].time;
+    const lastTime = timeline[timeline.length - 1].time;
+    const wrapped = previous >= lastTime - 1 && time <= firstTime + 3;
+    if (!wrapped) return;
+    this.transitionFirstLyricIndex = this.track.length;
+    this.transitionTimelineStart = 0;
+    this.loopCycleActive = true;
+    this.track.push(...timeline.map((line) => ({ kind: "lyric" as const, line })));
+    this.renderer.markAllDirty();
+    this.renderer.requestRender();
   }
 
   private depthScale(distance: number): number {
