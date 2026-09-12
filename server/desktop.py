@@ -1,26 +1,25 @@
-"""LyricServer 绿色桌面入口：托盘、设置和内嵌 HTTP/SSE 服务。"""
+"""LyricServer 绿色桌面入口：托盘和内嵌 HTTP/SSE 服务。"""
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-import shutil
 import sys
 from pathlib import Path
 
 from . import autostart
 from .config import (
-    APP_NAME, ServerConfig, desktop_config_path, load_config, save_config,
+    APP_NAME, APP_VERSION, ServerConfig, desktop_config_path, load_config,
     user_data_dir,
 )
 from .server import serve, setup_file_logging
 
 try:
-    from PySide6.QtCore import QThread, QUrl, Signal
+    from PySide6.QtCore import QThread, QUrl, Qt, Signal
     from PySide6.QtGui import QAction, QDesktopServices, QIcon
     from PySide6.QtWidgets import (
-        QApplication, QCheckBox, QDialog, QDialogButtonBox, QFormLayout,
-        QLabel, QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon,
+        QApplication, QDialog, QFrame, QHBoxLayout, QLabel, QMenu,
+        QMessageBox, QPushButton, QStyle, QSystemTrayIcon, QToolButton,
         QVBoxLayout,
     )
 except ImportError as exc:  # 让源码命令行仍可在未安装桌面依赖时工作
@@ -75,54 +74,133 @@ class ServerWorker(QThread):
             self._loop.call_soon_threadsafe(self._stop_event.set)
 
 
-class SettingsDialog(QDialog):
+class AboutDialog(QDialog):
+    """不依赖系统信息框的轻量品牌说明窗口。"""
+
     def __init__(self, parent: "TrayApplication") -> None:
-        super().__init__(parent)
-        self._parent = parent
-        self.setWindowTitle(f"{APP_NAME} 设置")
-        self.setMinimumWidth(430)
+        # QApplication 不是 QWidget，不能作为 QDialog 的 Qt 父对象；仅借用它的图标。
+        super().__init__()
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setModal(True)
+        self.setFixedSize(464, 310)
+        self.setWindowIcon(parent.windowIcon())
+        self._drag_origin = None
 
-        layout = QVBoxLayout(self)
-        form = QFormLayout()
-        self._autostart = QCheckBox("登录 Windows 后自动启动")
-        self._autostart.setChecked(autostart.is_enabled())
-        form.addRow("开机自启动", self._autostart)
-        self._netease = QCheckBox("网易云音乐")
-        self._netease.setChecked(parent.config.music.enable_netease)
-        form.addRow("播放器", self._netease)
-        self._apple = QCheckBox("Microsoft Store 版 Apple Music")
-        self._apple.setChecked(parent.config.music.enable_apple)
-        form.addRow("", self._apple)
-        form.addRow("本地 API", QLabel("http://127.0.0.1:9863（壁纸固定使用）"))
-        form.addRow("数据目录", QLabel(str(Path(user_data_dir()))))
-        layout.addLayout(form)
+        self.setStyleSheet("""
+            QFrame#card {
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                    stop: 0 #FCFEFF, stop: 0.54 #F6FAFD, stop: 1 #EEF5FA);
+                border: 1px solid #D5E2EC;
+                border-radius: 22px;
+            }
+            QLabel#eyebrow { color: #167DB1; font-size: 10px; font-weight: 700; letter-spacing: 1.7px; }
+            QLabel#title { color: #17354C; font-size: 25px; font-weight: 700; }
+            QLabel#version { color: #60788C; font-size: 11px; }
+            QLabel#description { color: #42596A; font-size: 13px; line-height: 1.45; }
+            QLabel#section { color: #6B8293; font-size: 10px; font-weight: 700; letter-spacing: 1.2px; }
+            QLabel#link a { color: #167DB1; font-size: 13px; text-decoration: none; }
+            QLabel#link a:hover { color: #075D8C; text-decoration: underline; }
+            QFrame#divider { background: #DDE7EE; }
+            QToolButton#close {
+                color: #60788C; background: transparent; border: 0; border-radius: 12px;
+                font-size: 19px; font-weight: 300;
+            }
+            QToolButton#close:hover { color: #17354C; background: #E5F1F8; }
+            QPushButton#done {
+                color: #FFFFFF; background: #167DB1; border: 1px solid #0D6E9E;
+                border-radius: 9px; padding: 7px 22px; font-size: 12px; font-weight: 600;
+            }
+            QPushButton#done:hover { background: #2498D2; }
+            QPushButton#done:pressed { background: #10618D; }
+        """)
 
-        open_dir = QPushButton("打开数据目录")
-        open_dir.clicked.connect(self._parent.open_data_directory)
-        clear_cache = QPushButton("清理歌词缓存")
-        clear_cache.clicked.connect(self._parent.clear_lyrics_cache)
-        layout.addWidget(open_dir)
-        layout.addWidget(clear_cache)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        card = QFrame()
+        card.setObjectName("card")
+        root.addWidget(card)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(28, 20, 28, 22)
+        layout.setSpacing(0)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        top = QHBoxLayout()
+        eyebrow = QLabel("LOCAL LYRIC SERVICE")
+        eyebrow.setObjectName("eyebrow")
+        top.addWidget(eyebrow)
+        top.addStretch()
+        close = QToolButton()
+        close.setObjectName("close")
+        close.setText("×")
+        close.setToolTip("关闭")
+        close.setFixedSize(28, 28)
+        close.clicked.connect(self.reject)
+        top.addWidget(close)
+        layout.addLayout(top)
+        layout.addSpacing(12)
 
-    def _save(self) -> None:
-        try:
-            if self._autostart.isChecked():
-                autostart.enable()
-            else:
-                autostart.disable()
-            self._parent.save_preferences(
-                enable_netease=self._netease.isChecked(),
-                enable_apple=self._apple.isChecked(),
-            )
-        except RuntimeError as exc:
-            QMessageBox.warning(self, APP_NAME, str(exc))
-            return
-        self.accept()
+        hero = QHBoxLayout()
+        icon = QLabel()
+        icon.setPixmap(parent.windowIcon().pixmap(58, 58))
+        icon.setFixedSize(58, 58)
+        hero.addWidget(icon)
+        hero.addSpacing(14)
+        name = QVBoxLayout()
+        title = QLabel(APP_NAME)
+        title.setObjectName("title")
+        name.addWidget(title)
+        version = QLabel(f"版本 {APP_VERSION}  ·  Windows 本地服务")
+        version.setObjectName("version")
+        name.addWidget(version)
+        name.addStretch()
+        hero.addLayout(name)
+        hero.addStretch()
+        layout.addLayout(hero)
+        layout.addSpacing(17)
+
+        description = QLabel("为动态歌词壁纸提供稳定的播放状态、逐行歌词与 SSE 推送。")
+        description.setObjectName("description")
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        layout.addSpacing(17)
+        divider = QFrame()
+        divider.setObjectName("divider")
+        divider.setFixedHeight(1)
+        layout.addWidget(divider)
+        layout.addSpacing(14)
+
+        project_label = QLabel("项目主页")
+        project_label.setObjectName("section")
+        layout.addWidget(project_label)
+        layout.addSpacing(5)
+        link = QLabel('<a href="https://github.com/ningjx/lyric-wallpaper">github.com/ningjx/lyric-wallpaper ↗</a>')
+        link.setObjectName("link")
+        link.setOpenExternalLinks(True)
+        layout.addWidget(link)
+        layout.addStretch()
+
+        footer = QHBoxLayout()
+        footer.addStretch()
+        done = QPushButton("完成")
+        done.setObjectName("done")
+        done.setDefault(True)
+        done.clicked.connect(self.accept)
+        footer.addWidget(done)
+        layout.addLayout(footer)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_origin = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_origin is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_origin)
+            event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._drag_origin = None
+        super().mouseReleaseEvent(event)
 
 
 class TrayApplication(QApplication):
@@ -169,9 +247,11 @@ class TrayApplication(QApplication):
         restart = QAction("重启服务", self)
         restart.triggered.connect(self.restart_server)
         menu.addAction(restart)
-        settings = QAction("设置", self)
-        settings.triggered.connect(self.open_settings)
-        menu.addAction(settings)
+        self._autostart_action = QAction("开机启动", self)
+        self._autostart_action.setCheckable(True)
+        self._autostart_action.setChecked(autostart.is_enabled())
+        self._autostart_action.toggled.connect(self.set_autostart)
+        menu.addAction(self._autostart_action)
         logs = QAction("打开日志目录", self)
         logs.triggered.connect(self.open_data_directory)
         menu.addAction(logs)
@@ -221,37 +301,25 @@ class TrayApplication(QApplication):
         elif self._status != "启动失败":
             self._set_status("已停止")
 
-    def open_settings(self) -> None:
-        SettingsDialog(self).exec()
-
-    def save_preferences(self, *, enable_netease: bool, enable_apple: bool) -> None:
-        if not enable_netease and not enable_apple:
-            raise RuntimeError("至少需要保留一个播放器数据源")
-        changed = (self.config.music.enable_netease != enable_netease
-                   or self.config.music.enable_apple != enable_apple)
-        self.config.music.enable_netease = enable_netease
-        self.config.music.enable_apple = enable_apple
-        save_config(self.config, desktop_config_path())
-        if changed:
-            self.restart_server()
+    def set_autostart(self, enabled: bool) -> None:
+        try:
+            if enabled:
+                autostart.enable()
+            else:
+                autostart.disable()
+        except RuntimeError as exc:
+            self._autostart_action.blockSignals(True)
+            self._autostart_action.setChecked(autostart.is_enabled())
+            self._autostart_action.blockSignals(False)
+            self._tray.showMessage(APP_NAME, str(exc), QSystemTrayIcon.MessageIcon.Warning)
 
     def open_data_directory(self) -> None:
         path = Path(user_data_dir())
         path.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
-    def clear_lyrics_cache(self) -> None:
-        cache = Path(user_data_dir()) / "lyrics"
-        if not cache.exists():
-            QMessageBox.information(None, APP_NAME, "当前没有可清理的歌词缓存。")
-            return
-        if QMessageBox.question(None, APP_NAME, "确定清理已缓存的歌词吗？") != QMessageBox.StandardButton.Yes:
-            return
-        shutil.rmtree(cache)
-        QMessageBox.information(None, APP_NAME, "歌词缓存已清理。")
-
     def show_about(self) -> None:
-        QMessageBox.information(None, APP_NAME, "LyricServer\n为动态歌词壁纸提供本机播放状态、歌词与 SSE 服务。")
+        AboutDialog(self).exec()
 
     def quit_application(self) -> None:
         self._restart_pending = False

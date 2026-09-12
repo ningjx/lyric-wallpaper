@@ -15,6 +15,7 @@ from typing import Any
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SERVER_DIR)
 APP_NAME = "LyricServer"
+APP_VERSION = "0.0.4"
 
 
 def is_packaged() -> bool:
