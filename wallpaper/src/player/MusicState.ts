@@ -20,6 +20,11 @@ export interface LyricsTarget {
   /** 切歌时清空「当前歌」临时偏移（可选，仅需临时偏移功能的渲染层实现） */
   clearTempOffset?(): void;
 }
+
+/** 在没有可展示歌词时承接画面的独立内容层。 */
+export interface IdleContentTarget {
+  setVisible(visible: boolean): void;
+}
 /**
  * 音乐状态机：SSE 事件驱动 + 低频进度校准。
  *
@@ -40,13 +45,18 @@ export class MusicState {
   private calibrateTimer: number | null = null;
   private calibrating = false;
   private pollIntervalMs = 200;
-  private noSongTimer: number | null = null;
+  private idleTimer: number | null = null;
+  private idleDelayMs = 30_000;
+  private idleReason: "no-song" | "paused" | null = null;
+  /** 暂停超时后清空过歌词；恢复时应像切歌一样重新装载。 */
+  private pausedSongWasCleared = false;
 
   constructor(
     private readonly api: NowPlayingApi,
     private readonly clock: SyncClock,
     private readonly target: LyricsTarget,
     private readonly scene: SceneController,
+    private readonly idleContent?: IdleContentTarget,
     sse?: SseClient,
   ) {
     this.sse = sse ?? new SseClient();
@@ -68,10 +78,8 @@ export class MusicState {
       window.clearInterval(this.calibrateTimer);
       this.calibrateTimer = null;
     }
-    if (this.noSongTimer !== null) {
-      window.clearTimeout(this.noSongTimer);
-      this.noSongTimer = null;
-    }
+    this.cancelIdleTimer();
+    this.idleContent?.setVisible(false);
     this.sse.stop();
   }
 
@@ -81,6 +89,16 @@ export class MusicState {
     if (next === this.pollIntervalMs) return;
     this.pollIntervalMs = next;
     if (this.calibrateTimer !== null) this.restartCalibrateTimer();
+  }
+
+  /** 设置无歌曲或暂停多久后切到无播放内容；0 表示立即切换。 */
+  setIdleDelay(ms: number): void {
+    this.idleDelayMs = Math.max(0, Math.round(ms));
+    if (this.idleTimer !== null) {
+      const reason = this.idleReason ?? "paused";
+      this.cancelIdleTimer();
+      this.scheduleIdle(reason);
+    }
   }
 
   private restartCalibrateTimer(): void {
@@ -97,17 +115,32 @@ export class MusicState {
     this.clock.calibrate(s.progress || 0, s.hasSong && s.playing);
 
     if (!s.hasSong) {
-      // 无歌曲/停止播放：只清空歌词、重置时钟。壁纸场景必须常驻，不能
-      // 因播放器在切歌间隙短暂上报“无歌曲”而把整个桌面淡成黑色。
-      this.scheduleNoSongClear();
+      // 无歌曲与暂停共用同一套空闲计时，防止切歌的瞬时空窗导致立即切换。
+      this.scheduleIdle("no-song");
       return;
     }
 
-    this.cancelNoSongClear();
+    if (s.playing) {
+      this.cancelIdleTimer();
+      this.idleContent?.setVisible(false);
+      if (this.pausedSongWasCleared) {
+        // 清空过的暂停歌曲恢复播放：强制走一次完整的切歌/歌词加载流程。
+        this.pausedSongWasCleared = false;
+        this.songKey = null;
+      }
+    } else {
+      this.scheduleIdle("paused");
+    }
 
     // 歌曲变化：切歌（用 song|author 作 key，切歌事件的瞬间就有，不必等搜索返回 id）
     const key = `${s.song}|${s.author}`;
     if (key !== this.songKey) {
+      // 空闲层期间换了一首（即使新歌恰好也是暂停）：应立刻回到歌词状态，
+      // 并从这次暂停重新计时，不能沿用上一首歌已经触发过的空闲标记。
+      this.pausedSongWasCleared = false;
+      this.cancelIdleTimer();
+      this.idleContent?.setVisible(false);
+      if (!s.playing) this.scheduleIdle("paused");
       this.songKey = key;
       // 切歌 → 清空上一首的临时偏移（仅当前歌有效）
       this.target.clearTempOffset?.();
@@ -157,29 +190,56 @@ export class MusicState {
   }
 
   private setOnline(v: boolean): void {
+    if (!v) {
+      if (!this.online && this.idleContent) {
+        // 初始连接尚未建立时也应立即有内容可显示。
+        this.idleContent.setVisible(true);
+        return;
+      }
+      if (!this.online) return;
+      // 本地服务不可达时没有可用的播放状态，直接交给空闲内容层。
+      // 清空并重置 key，确保服务恢复后会重新请求当前歌曲歌词。
+      this.cancelIdleTimer();
+      this.clock.reset();
+      this.songKey = null;
+      this.seq++;
+      this.target.clear();
+      this.pausedSongWasCleared = false;
+      this.idleContent?.setVisible(true);
+    }
     if (this.online === v) return;
     this.online = v;
-    const el = document.getElementById("offline");
-    if (el) el.hidden = v;
+    // 服务刚恢复时先收起旧的时钟，再由本次播放器状态决定是否重新开始 30 秒计时。
+    if (v) this.idleContent?.setVisible(false);
   }
 
   /**
    * 切歌时播放器可能有一帧短暂上报 hasSong=false；延迟确认避免把旧歌词队列
    * 清掉。真正停止播放后才清空歌词，Canvas 背景仍保持显示。
    */
-  private scheduleNoSongClear(): void {
-    if (this.noSongTimer !== null) return;
-    this.noSongTimer = window.setTimeout(() => {
-      this.noSongTimer = null;
+  private scheduleIdle(reason: "no-song" | "paused"): void {
+    if (this.idleTimer !== null || this.pausedSongWasCleared) return;
+    this.idleReason = reason;
+    this.idleTimer = window.setTimeout(() => {
+      this.idleTimer = null;
       this.clock.reset();
-      this.songKey = null;
       this.target.clear();
-    }, 900);
+      // 暂停时必须保留 songKey；否则下一轮 200ms 校准会把同一首暂停
+      // 歌曲误判为切歌，随即重新挂回歌词，导致时钟只闪一下。
+      if (this.idleReason === "no-song") {
+        this.songKey = null;
+        this.pausedSongWasCleared = false;
+      } else {
+        this.pausedSongWasCleared = true;
+      }
+      this.idleContent?.setVisible(true);
+    }, this.idleDelayMs);
   }
 
-  private cancelNoSongClear(): void {
-    if (this.noSongTimer === null) return;
-    window.clearTimeout(this.noSongTimer);
-    this.noSongTimer = null;
+  private cancelIdleTimer(): void {
+    if (this.idleTimer === null) return;
+    window.clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    this.idleReason = null;
   }
 }

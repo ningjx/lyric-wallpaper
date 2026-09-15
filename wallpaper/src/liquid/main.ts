@@ -8,6 +8,7 @@ import { SceneController } from "../scene";
 import { DEFAULT_SETTINGS, setupWallpaperEnvironment, type WallpaperSettings } from "../wallpaper";
 import { ReferenceLyricsWallpaper } from "./reference-wallpaper";
 import { WallpaperPerformanceProbe, type WallpaperPerformanceSnapshot } from "./performance-probe";
+import { IdleContent } from "../idle-content";
 
 const lines = parseLrc(`[00:00.00]把城市的声音调低
 [00:05.50]听见晚风穿过缝隙
@@ -36,6 +37,7 @@ let last = performance.now();
 let frame: number | null = null;
 let wallpaper: ReferenceLyricsWallpaper | null = null;
 let musicState: MusicState | null = null;
+let idleContent: IdleContent | null = null;
 let clock: SyncClock | null = null;
 let activeBackgroundImage = "";
 let backgroundTimer: number | null = null;
@@ -53,6 +55,7 @@ setupWallpaperEnvironment((settings) => {
   };
   wallpaper?.setSettings(wallpaperSettings.liquid);
   musicState?.setPollInterval(settings.pollIntervalMs);
+  musicState?.setIdleDelay(settings.idleDelaySeconds * 1_000);
   syncBackgroundSlideshow();
 });
 
@@ -125,8 +128,10 @@ async function boot(): Promise<void> {
     if (previewMode) {
     } else {
       clock = new SyncClock();
-      musicState = new MusicState(new NowPlayingApi(), clock, wallpaper, sceneController);
+      idleContent = new IdleContent(wallpaper);
+      musicState = new MusicState(new NowPlayingApi(), clock, wallpaper, sceneController, idleContent);
       musicState.setPollInterval(wallpaperSettings.pollIntervalMs);
+      musicState.setIdleDelay(wallpaperSettings.idleDelaySeconds * 1_000);
       musicState.start();
     }
     const tick = (now: number): void => {
@@ -184,5 +189,6 @@ window.addEventListener("pagehide", () => {
   if (backgroundTimer !== null) clearInterval(backgroundTimer);
   backgroundRequestGeneration++;
   musicState?.stop();
+  idleContent?.dispose();
   wallpaper?.dispose();
 }, { once: true });

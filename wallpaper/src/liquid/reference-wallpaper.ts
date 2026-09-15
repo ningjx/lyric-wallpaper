@@ -82,6 +82,8 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   private transitionTimelineStart = 0;
   private transitionFirstLyricIndex: number | null = null;
   private transitionReleased = false;
+  /** 空闲状态的时钟内容；与歌词共用同一个 WebGL 玻璃渲染器。 */
+  private idleClock: { time: string; date: string } | null = null;
   /** 用于识别同一首歌从末尾回到开头的单曲循环回绕。 */
   private lastTimelineTime = Number.NaN;
   private loopCycleActive = false;
@@ -227,6 +229,15 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
 
   getLines(): readonly LyricLine[] {
     return this.track.flatMap((item) => item.kind === "lyric" ? [item.line] : []);
+  }
+
+  /** 显示或移除空闲时钟。传入 null 时仅保留背景，不渲染任何玻璃元素。 */
+  setIdleClock(time: string | null, date = ""): void {
+    this.idleClock = time ? { time, date } : null;
+    if (this.track.length > 0) return;
+    this.rebuild(0);
+    this.renderer.markAllDirty();
+    this.renderer.requestRender();
   }
 
   /**
@@ -383,7 +394,7 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
   private rebuild(active: number, focus = active): void {
     if (!this.width || !this.height) return;
     if (this.track.length === 0) {
-      this.renderer.setElements([]);
+      this.renderer.setElements(this.idleClock ? this.idleClockElements() : []);
       this.renderer.setContentHeight(this.height);
       return;
     }
@@ -490,6 +501,49 @@ export class ReferenceLyricsWallpaper implements LyricsTarget {
 
   private songEntryDistance(): number {
     return Math.max(this.height * .72, this.rowGap() * 1.4);
+  }
+
+  /** 空闲控件故意只用一块大玻璃：像歌词的主句一样成为视觉焦点。 */
+  private idleClockElements(): GlassElementConfig[] {
+    const clock = this.idleClock!;
+    const timeFontSize = Math.max(72, Math.min(232, this.width * .145));
+    const dateFontSize = Math.max(16, Math.min(30, timeFontSize * .17));
+    const timeMetrics = this.measureText(clock.time, 500, timeFontSize);
+    const dateMetrics = this.measureText(clock.date, 500, dateFontSize);
+    const paddingX = Math.max(42, timeFontSize * .34);
+    const paddingY = Math.max(30, timeFontSize * .22);
+    const cardWidth = Math.min(this.width * .82, Math.max(timeMetrics.width, dateMetrics.width) + paddingX * 2);
+    const cardHeight = timeMetrics.height + dateMetrics.height + paddingY * 2 + timeFontSize * .08;
+    const card = {
+      x: (this.width - cardWidth) / 2,
+      y: (this.height - cardHeight) / 2,
+      w: cardWidth,
+      h: cardHeight,
+    };
+    const timeRect = {
+      x: card.x,
+      y: card.y + paddingY - timeMetrics.opticalOffset,
+      w: card.w,
+      h: timeMetrics.height,
+    };
+    const dateRect = {
+      x: card.x,
+      y: timeRect.y + timeMetrics.height + timeFontSize * .08,
+      w: card.w,
+      h: dateMetrics.height,
+    };
+    const glassStrength = 1;
+    const glass = this.glassRow(-1, card, glassStrength);
+    glass.id = "idle-clock-glass";
+    const time = {
+      ...this.base("idle-clock-time", "text", timeRect),
+      text: { content: clock.time, color: [.94, .985, 1, 1] as [number, number, number, number], fontSizePx: timeFontSize, fontWeight: 500, align: "center" as const, halo: "dark" as const },
+    };
+    const date = {
+      ...this.base("idle-clock-date", "text", dateRect),
+      text: { content: clock.date, color: [.82, .93, 1, .68] as [number, number, number, number], fontSizePx: dateFontSize, fontWeight: 500, align: "center" as const, halo: "dark" as const },
+    };
+    return this.settings.lyricBehindGlass ? [time, date, glass] : [glass, time, date];
   }
 
   /**

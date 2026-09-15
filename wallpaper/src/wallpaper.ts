@@ -34,6 +34,8 @@ export interface WallpaperSettings {
   lyricLeadMs: number;
   /** /query 的校准轮询频率，单位毫秒。 */
   pollIntervalMs: number;
+  /** 无歌曲或暂停多久后自动切换到无播放内容，单位秒。 */
+  idleDelaySeconds: number;
   /** 液态玻璃渲染器的全部持久化设置。 */
   liquid: LiquidSettings;
 }
@@ -59,6 +61,7 @@ export const DEFAULT_SETTINGS: WallpaperSettings = {
   showControls: false,
   lyricLeadMs: 0,
   pollIntervalMs: 200,
+  idleDelaySeconds: 30,
   liquid: { ...DEFAULT_LIQUID_SETTINGS },
 };
 
@@ -85,6 +88,7 @@ export function setupWallpaperEnvironment(onChange: SettingsListener): void {
       const showControls = propertyValue(properties.showcontrols);
       const lyricLeadMs = readNumber(propertyValue(properties.lyricleadms));
       const pollIntervalMs = readPositiveNumber(propertyValue(properties.pollintervalms));
+      const idleDelaySeconds = readNonNegativeNumber(propertyValue(properties.idledelayseconds));
       const backgroundDirectory = propertyValue(properties.backgrounddirectory);
 
       if (fontSize !== null) current.fontSize = fontSize;
@@ -98,6 +102,7 @@ export function setupWallpaperEnvironment(onChange: SettingsListener): void {
       if (visible !== null) current.showControls = visible;
       if (lyricLeadMs !== null) current.lyricLeadMs = lyricLeadMs;
       if (pollIntervalMs !== null) current.pollIntervalMs = pollIntervalMs;
+      if (idleDelaySeconds !== null) current.idleDelaySeconds = idleDelaySeconds;
       if (typeof backgroundDirectory === "string") current.liquid.backgroundDirectory = backgroundDirectory;
 
       for (const [property, key] of Object.entries(NUMBER_PROPERTIES)) {
@@ -137,6 +142,11 @@ function readNumber(value: unknown): number | null {
 function readPositiveNumber(value: unknown): number | null {
   const n = readNumber(value);
   return n !== null && n > 0 ? n : null;
+}
+
+function readNonNegativeNumber(value: unknown): number | null {
+  const n = readNumber(value);
+  return n === null || n < 0 ? null : n;
 }
 
 const NUMBER_PROPERTIES: Record<string, keyof LiquidSettings> = {
