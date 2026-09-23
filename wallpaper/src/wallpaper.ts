@@ -4,10 +4,12 @@
  * 官方约定：Web Wallpaper 定义全局 `wallpaperPropertyListener` 接收用户属性。
  * - applyUserProperties(properties)：用户改动属性时触发，且只包含"发生变化"的属性，
  *   值通过 `properties.<key>.value` 读取。
- * - applyGeneralProperties(properties)：全局属性（如 FPS 限制）。
+ * - applyGeneralProperties(properties)：全局属性，帧率上限通过
+ *   `properties.fps`（裸数字，不带 `.value`）下发。WE 不会替 Web 壁纸 throttle，
+ *   它只把用户设置告知壁纸，须由壁纸自行节流（官方 FPS Limiter 文档）。
  *
  * 本项目把"歌词字号 / 行距 / 同步偏移 / 水平偏移 / 垂直偏移 / 亮度 / 字体"
- * 接到这里，回调给渲染器与 CSS 变量。
+ * 接到这里，回调给渲染器与 CSS 变量；全局帧率上限单独回调给帧节拍器。
  */
 import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_GAP } from "./defaults";
 import { DEFAULT_LIQUID_SETTINGS, type LiquidSettings } from "./liquid/reference-wallpaper";
@@ -62,9 +64,21 @@ export const DEFAULT_SETTINGS: WallpaperSettings = {
   liquid: { ...DEFAULT_LIQUID_SETTINGS },
 };
 
-type SettingsListener = (settings: WallpaperSettings) => void;
+/** Wallpaper Engine 全局（非用户属性）设置。 */
+export interface GeneralSettings {
+  /** Performance 标签页中的帧率上限（帧/秒）；0 表示不限制。 */
+  fps: number;
+}
 
-export function setupWallpaperEnvironment(onChange: SettingsListener): void {
+export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = { fps: 0 };
+
+type SettingsListener = (settings: WallpaperSettings) => void;
+type GeneralSettingsListener = (general: GeneralSettings) => void;
+
+export function setupWallpaperEnvironment(
+  onChange: SettingsListener,
+  onGeneralChange?: GeneralSettingsListener,
+): void {
   const w = window as unknown as Record<string, unknown>;
 
   // Wallpaper Engine 的加载器约定：直接定义该全局对象
@@ -72,6 +86,7 @@ export function setupWallpaperEnvironment(onChange: SettingsListener): void {
 
   // applyUserProperties 每次只传变化的属性，需在本地累积最新值
   const current: WallpaperSettings = { ...DEFAULT_SETTINGS, liquid: { ...DEFAULT_SETTINGS.liquid } };
+  const general: GeneralSettings = { ...DEFAULT_GENERAL_SETTINGS };
 
   w.wallpaperPropertyListener = {
     applyUserProperties(properties: Record<string, unknown>): void {
@@ -115,8 +130,14 @@ export function setupWallpaperEnvironment(onChange: SettingsListener): void {
 
       onChange({ ...current });
     },
-    applyGeneralProperties(): void {
-      // 预留：全局属性接入点（如 FPS 限制）
+    applyGeneralProperties(properties: Record<string, unknown>): void {
+      // 该回调也会在只改动其他全局设置时触发，此时不含 fps：保留上一次的值。
+      // `fps` 是裸数字，不走 `{ value }` 包装，但用 propertyValue 兼容两种形态。
+      const fps = readNumber(propertyValue(properties.fps));
+      if (fps === null || fps < 0) return;
+      if (fps === general.fps) return;
+      general.fps = fps;
+      onGeneralChange?.({ ...general });
     },
   };
 }

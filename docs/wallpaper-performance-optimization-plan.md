@@ -254,7 +254,33 @@ npm run build
 
 ---
 
-## 8. 失败实验记录：`lyricBehindGlass` 背景模糊（2026-09-07）
+## 8. 帧率上限接入（2026-09-23）
+
+**问题**：WE 的 Performance → 帧率设置对本壁纸没有任何影响，帧率既不跟随调高也不跟随调低。
+
+**根因**：`wallpaper/src/wallpaper.ts` 的 `applyGeneralProperties()` 只留了空实现，
+WE 通过 `properties.fps` 下发的上限被直接丢弃；渲染循环是一段无节拍的
+rAF 调用，因此帧率完全由 CEF 宿主的 rAF 节拍决定。按 WE 官方
+“FPS Limiter” 文档，**WE 不会替 Web 壁纸 throttle**，只负责告知期望值，
+必须由壁纸自行按时间累积节流。
+
+**改动**：
+
+1. `applyGeneralProperties()` 读取 `properties.fps`（裸数字，非 `{ value }` 包装），
+   通过新增的 `GeneralSettings` 回调下发给渲染层；部分更新不含 `fps` 时保留旧值。
+2. 新增 `wallpaper/src/player/frame-pacer.ts`：按 WE 文档的时间累积算法实现节拍上限。
+   `fps <= 0` 视为不限制，与旧行为一致；挂起恢复后只放行一帧，不补帧。
+3. `liquid/main.ts` 的 rAF 循环在推进弹簧/渲染前先过该节拍器。跳过的帧不推进弹簧，
+   但 `draw()` 以 rAF 时间戳计算 delta，因此动画与歌词时间轴仍是时间正确的。
+4. 诊断接口新增 `window.lyricWallpaperPerformance.fpsLimit()`，与 `snapshot()` 的
+   `rafPerSecond` / `renderedPerSecond` 对照即可确认设置是否生效。
+
+**注意**：该上限是天花板，**无法把帧率抬到宿主 rAF 节拍之上**。若 WE 设为 144
+而宿主只给 60Hz 的 rAF，本改动只能保证“不超发”，不能凭空造帧。
+
+---
+
+## 9. 失败实验记录：`lyricBehindGlass` 背景模糊（2026-09-07）
 
 目标是让歌词位于玻璃背后，同时保留“模糊背景 + 清晰歌词参与折射 + 顶层高光”的层次。以下尝试均已经过实机否定，**不得在没有可视化 FBO 验证的前提下恢复**：
 

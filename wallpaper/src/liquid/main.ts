@@ -8,6 +8,7 @@ import { SceneController } from "../scene";
 import { DEFAULT_SETTINGS, setupWallpaperEnvironment, type WallpaperSettings } from "../wallpaper";
 import { ReferenceLyricsWallpaper } from "./reference-wallpaper";
 import { WallpaperPerformanceProbe, type WallpaperPerformanceSnapshot } from "./performance-probe";
+import { FramePacer } from "../player/frame-pacer";
 
 const lines = parseLrc(`[00:00.00]把城市的声音调低
 [00:05.50]听见晚风穿过缝隙
@@ -31,6 +32,8 @@ const previewMode = still || params.get("demo") === "1";
 const requestedTime = Number(params.get("time") ?? 16.5);
 const performanceProbe = new WallpaperPerformanceProbe();
 const performanceEnabled = params.get("perf") === "1";
+// WE 只下发帧率上限、不代管节流，故渲染节拍由本地节拍器决定。
+const framePacer = new FramePacer();
 let elapsed = Number.isFinite(requestedTime) ? Math.max(0, requestedTime) : 16.5;
 let last = performance.now();
 let frame: number | null = null;
@@ -54,6 +57,9 @@ setupWallpaperEnvironment((settings) => {
   wallpaper?.setSettings(wallpaperSettings.liquid);
   musicState?.setPollInterval(settings.pollIntervalMs);
   syncBackgroundSlideshow();
+}, (general) => {
+  // 帧率上限来自 WE 的 Performance 设置；不实现这里，该设置对本壁纸完全无效。
+  framePacer.setFps(general.fps);
 });
 
 function syncBackgroundSlideshow(): void {
@@ -131,6 +137,12 @@ async function boot(): Promise<void> {
     }
     const tick = (now: number): void => {
       performanceProbe.onAnimationFrame();
+      // 按 WE 下发的 fps 节流。被跳过的帧不推进弹簧，但 draw() 以 rAF 时间戳
+      // 计算 delta，因此动画与歌词时间轴仍是时间正确的，不会随跳帧变慢。
+      if (!framePacer.shouldUpdate(now)) {
+        frame = requestAnimationFrame(tick);
+        return;
+      }
       if (previewMode && !still) elapsed += Math.min(.1, (now - last) / 1000);
       last = now;
       const songTime = previewMode
@@ -168,6 +180,10 @@ function exposePerformanceProbe(): void {
     setEnabled(enabled: boolean): void {
       wallpaper?.setPerformanceMonitoring(enabled);
       if (enabled && wallpaper) performanceProbe.reset(wallpaper.getPerformanceSnapshot().renderer);
+    },
+    /** WE 下发的帧率上限（0 = 未限制），用来核对实际帧率是否跟随设置。 */
+    fpsLimit(): number {
+      return framePacer.getFps();
     },
   };
   (window as Window & { lyricWallpaperPerformance?: typeof api }).lyricWallpaperPerformance = api;
