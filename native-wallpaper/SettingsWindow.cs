@@ -316,12 +316,12 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
     {
         var grid = Fields();
         string image = wallpaper.Background, directory = wallpaper.BackgroundDirectory;
-        var fileLabel = PathLabel(image, "内置城市夜景");
+        var fileLabel = PathLabel(image, "纯色背景");
         var folderLabel = PathLabel(directory, "未设置轮播文件夹");
         void ApplyPaths()
         {
             QueueWallpaper(s => s with { Background = image, BackgroundDirectory = directory });
-            SetPath(fileLabel, image, "内置城市夜景");
+            SetPath(fileLabel, image, "纯色背景");
             SetPath(folderLabel, directory, "未设置轮播文件夹");
         }
         AddField(grid, "背景图片", Inline(fileLabel, Button("选择…", () =>
@@ -336,7 +336,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
             image = picker.FileName;
             directory = "";
             ApplyPaths();
-        }), Button("内置", () =>
+        }), Button("纯色", () =>
         {
             image = "";
             directory = "";

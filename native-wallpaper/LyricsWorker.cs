@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 
@@ -127,10 +128,11 @@ internal sealed class LyricsWorker : IDisposable
             StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
             WorkingDirectory = AppContext.BaseDirectory
         };
-        string packaged = Path.Combine(AppContext.BaseDirectory, "worker", "LyricWorker.exe");
-        if (python is null && File.Exists(packaged))
+        string? packaged = python is null ? FindPackagedWorker() : null;
+        if (packaged is not null)
         {
             start.FileName = packaged;
+            start.WorkingDirectory = Path.GetDirectoryName(packaged)!;
         }
         else
         {
@@ -138,7 +140,7 @@ internal sealed class LyricsWorker : IDisposable
             while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "server", "worker.py")))
                 directory = directory.Parent;
             if (directory is null)
-                throw new FileNotFoundException("找不到随程序发布的歌词采集组件。", packaged);
+                throw new FileNotFoundException("找不到歌词采集组件或源码目录。");
             start.FileName = python ?? "python";
             start.WorkingDirectory = directory.FullName;
             start.ArgumentList.Add("-m");
@@ -150,6 +152,39 @@ internal sealed class LyricsWorker : IDisposable
             start.ArgumentList.Add(Path.GetFullPath(config));
         }
         return start;
+    }
+
+    private static string? FindPackagedWorker()
+    {
+        var assembly = typeof(LyricsWorker).Assembly;
+        using var bundle = assembly.GetManifestResourceStream("LyricWorker.zip");
+        if (bundle is null)
+        {
+            string sidecar = Path.Combine(AppContext.BaseDirectory, "worker", "LyricWorker.exe");
+            return File.Exists(sidecar) ? sidecar : null;
+        }
+
+        string cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LyricWallpaper", "worker");
+        string directory = Path.Combine(cache, assembly.ManifestModule.ModuleVersionId.ToString("N"));
+        string executable = Path.Combine(directory, "LyricWorker.exe");
+        if (File.Exists(executable)) return executable;
+
+        // Publish the cache directory only once extraction has completed.
+        string staging = Path.Combine(cache, Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            using var archive = new ZipArchive(bundle, ZipArchiveMode.Read);
+            archive.ExtractToDirectory(staging);
+            if (!File.Exists(Path.Combine(staging, "LyricWorker.exe")))
+                throw new InvalidDataException("发布包中缺少歌词采集组件。");
+            Directory.Move(staging, directory);
+        }
+        catch (IOException) when (File.Exists(executable)) { }
+        finally
+        {
+            if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
+        }
+        return executable;
     }
 
     private static void Terminate(Process? child)

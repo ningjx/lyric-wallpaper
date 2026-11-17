@@ -39,7 +39,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: lyric-wallpaper-win-x64
-          path: release/LyricWallpaper-win-x64.zip
+          path: release/LyricWallpaper-win-x64.exe
           if-no-files-found: error
 
   release:
@@ -64,9 +64,8 @@ jobs:
         with:
           name: "歌词壁纸 ${{ github.ref_name }} · Windows 独立版"
           body: |
-            下载 `LyricWallpaper-win-x64.zip`，完整解压后运行 `NativeWallpaper.exe`。双击托盘图标打开设置。
+            下载并运行 `LyricWallpaper-win-x64.exe`。双击托盘图标打开设置。
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            release/LyricWallpaper-win-x64.zip
-            THIRD_PARTY_NOTICES.md
+            release/LyricWallpaper-win-x64.exe

@@ -15,8 +15,7 @@
   </ItemGroup>
   <ItemGroup>
     <Using Include="System.IO" />
-    <None Update="Glass.hlsl" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="assets/background.jpg"
-             Link="background.jpg" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Glass.hlsl" LogicalName="Glass.hlsl" />
+    <EmbeddedResource Include="$(WorkerBundle)" LogicalName="LyricWorker.zip" Condition="'$(WorkerBundle)' != ''" />
   </ItemGroup>
 </Project>

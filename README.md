@@ -4,9 +4,9 @@
 
 ## 开始使用
 
-1. [下载 Windows x64 独立版](https://github.com/ningjx/lyric-wallpaper/releases/latest/download/LyricWallpaper-win-x64.zip)，或在 [GitHub Releases](https://github.com/ningjx/lyric-wallpaper/releases) 查看版本记录。
-2. 解压完整目录，运行 `NativeWallpaper.exe`。发布包内含程序和歌词采集所需的运行时。
-3. 双击托盘图标，或右键选择「打开设置」。修改背景、歌词排版、DPR 和玻璃材质会实时应用并自动保存。
+1. [下载 Windows x64 单文件 EXE](https://github.com/ningjx/lyric-wallpaper/releases/latest/download/LyricWallpaper-win-x64.exe)，或在 [GitHub Releases](https://github.com/ningjx/lyric-wallpaper/releases) 查看版本记录。
+2. 直接运行 `LyricWallpaper-win-x64.exe`。程序会自动准备 .NET 和歌词采集所需的运行时。
+3. 双击托盘图标，或右键选择「打开设置」。默认使用纯色背景，可以选择自己的图片。修改会实时应用并自动保存。
 
 设置窗口顶部的「测试滚动」可以播放演示歌词，左下角的「开机自启」与托盘菜单同步。程序读取 `%LOCALAPPDATA%\LyricServer\config.json`，壁纸设置保存在同目录的 `wallpaper.json`。
 
@@ -18,7 +18,7 @@
 powershell -ExecutionPolicy Bypass -File scripts/build-native-wallpaper.ps1
 ```
 
-构建产物为 `release/LyricWallpaper-win-x64.zip`。更多启动参数、DPR 和全场模糊的测试结果见 [原生版使用说明](native-wallpaper/README.md)。
+构建产物为 `release/LyricWallpaper-win-x64.exe`。更多启动参数、DPR 和全场模糊的测试结果见 [原生版使用说明](native-wallpaper/README.md)。
 
 ## 项目结构
 

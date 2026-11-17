@@ -123,7 +123,13 @@ internal sealed record WallpaperSettings
 
     public Bitmap LoadBackground(string? selected = null)
     {
-        string path = selected ?? (Background.Length == 0 ? Path.Combine(AppContext.BaseDirectory, "background.jpg") : Background);
+        string path = selected ?? Background;
+        if (path.Length == 0)
+        {
+            var solid = new Bitmap(1, 1, PixelFormat.Format32bppArgb);
+            solid.SetPixel(0, 0, Color.FromArgb(9, 14, 19));
+            return solid;
+        }
         using var image = Image.FromFile(path);
         double scale = Math.Min(1, 4096d / Math.Max(image.Width, image.Height));
         var bitmap = new Bitmap(Math.Max(1, (int)(image.Width * scale)), Math.Max(1, (int)(image.Height * scale)),

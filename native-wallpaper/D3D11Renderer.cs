@@ -64,7 +64,10 @@ internal sealed unsafe class D3D11Renderer : IDisposable
             Adapter = ReadAdapter();
             target = CreateBackBufferTarget();
 
-            var source = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Glass.hlsl"));
+            using var shader = typeof(D3D11Renderer).Assembly.GetManifestResourceStream("Glass.hlsl")
+                ?? throw new InvalidOperationException("找不到内置玻璃着色器。");
+            var source = new byte[shader.Length];
+            shader.ReadExactly(source);
             backgroundVs = CreateShader(source, "BackgroundVertex", "vs_5_0", Device.CreateVertexShader);
             backgroundPs = CreateShader(source, "BackgroundPixel", "ps_5_0", Device.CreatePixelShader);
             cardVs = CreateShader(source, "CardVertex", "vs_5_0", Device.CreateVertexShader);
