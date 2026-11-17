@@ -1,5 +1,7 @@
 # server 端架构优化方案
 
+本文记录迁移前 Web 壁纸与 HTTP 服务的设计。原生版采集流程见 [服务说明](../server/README.md)，文中引用的 Web 客户端保存在 [Wallpaper Engine 分支](https://github.com/ningjx/lyric-wallpaper/tree/codex/wallpaper-engine)。
+
 > 版本：v1 · 2026-09-04
 > 状态：待评审（未实施，实施前请先阅读「11. 待拍板决策」）
 > 适用范围：`server/` 目录（`nowplaying_server.py` / `offset_probe.py` / `console.py` / `netease_nowplaying.py` 及周边）

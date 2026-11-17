@@ -18,6 +18,3 @@ server/offsets_config.json
 .package-staging/
 artifacts/
 data/
-
-# 早期玻璃原型：无任何入口引用，已由 wallpaper/src/liquid/ 取代
-wallpaper/src/glass/

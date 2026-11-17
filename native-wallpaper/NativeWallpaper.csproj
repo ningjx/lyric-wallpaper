@@ -16,7 +16,7 @@
   <ItemGroup>
     <Using Include="System.IO" />
     <None Update="Glass.hlsl" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="../wallpaper/public/backgrounds/wallhaven-vpolwm.jpg"
+    <Content Include="assets/background.jpg"
              Link="background.jpg" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -1,6 +1,6 @@
 # lyric-wallpaper server — 网易云音乐 / Apple Music Now Playing 服务
 
-为同仓库的壁纸前端（`wallpaper/src/`，Wallpaper Engine 歌词壁纸）提供网易云音乐或 Microsoft Store 版 Apple Music 的播放状态与歌词的本地服务，替代 [Widdit/now-playing-service](https://github.com/Widdit/now-playing-service)。
+为 [Windows 原生壁纸](../native-wallpaper/README.md) 采集网易云音乐或 Microsoft Store 版 Apple Music 的播放状态和歌词。原生程序启动 `server.worker` 或发布包内的 `LyricWorker.exe`，通过私有管道接收状态。独立 HTTP 模式仍可供 [Wallpaper Engine 旧版](https://github.com/ningjx/lyric-wallpaper/tree/codex/wallpaper-engine) 和其他兼容 [Now Playing API](https://github.com/Widdit/now-playing-service) 的客户端使用。
 
 **核心价值**：原 now-playing-service 通过 UI Automation 读取播放进度，最小化/桌面歌词模式下经常读不到。本项目改用**进程内存读取**，精度毫秒级、任何窗口状态都可用。
 
@@ -29,15 +29,18 @@ Apple Music (Microsoft Store)
           ├─ 播放 / 暂停
           └─ Timeline：当前进度 / 总时长（支持拖动进度条同步）
 
-server 包 (aiohttp 异步服务, 127.0.0.1:9863)
+server 包（共用采集、仲裁、匹配和缓存）
     │
-    ├─ GET /query      → 播放器+歌曲状态（兼容原服务格式）
-    ├─ GET /api/lyric  → LRC 歌词（兼容原服务格式，source 为实际 provider）
-    ├─ GET /sse        → 状态/切歌实时推送（可选，配合前端降频）
-    └─ GET /healthz, /metrics
+    ├─ 原生壁纸模式：私有管道，逐行发送 JSON 快照
+    │
+    └─ HTTP 模式（aiohttp，127.0.0.1:9863）
+        ├─ GET /query      → 播放器与歌曲状态
+        ├─ GET /api/lyric  → LRC 歌词，source 为实际 provider
+        ├─ GET /sse        → 状态与切歌推送
+        └─ GET /healthz, /metrics
 ```
 
-## 快速开始
+## 启动独立 HTTP 服务
 
 > ⚠️ `server/` 是 Python 包，`python -m server` 需在**仓库根目录**运行（不是 `server/` 内，相对导入需要父目录）。在 `server/` 内可用 `python run.py`。
 
@@ -50,16 +53,17 @@ python -m server                         # 默认端口 9863
 python run.py                            # 便捷入口，等价于上面
 ```
 
-可选：`--port` / `--host` / `--config config.json` / `--token`。缺省时与旧服务行为一致，壁纸前端无需任何改动（端口和 `/query`、`/api/lyric` 响应格式完全兼容）。
+可选参数有 `--port`、`--host`、`--config config.json` 和 `--token`。HTTP 模式保留原有端口及 `/query`、`/api/lyric` 的兼容响应。原生程序会自行管理管道模式的采集进程。
 
 ## 文件说明
 
 ### 核心模块（生产使用）
 
-`server/` 是 Python 包，入口 `python -m server`：
+`server/` 提供原生采集和独立 HTTP 两个入口。
 
 | 模块 | 作用 |
 |------|------|
+| `worker.py` | 原生采集入口，使用标准输入与输出和壁纸程序通信 |
 | `__main__.py` / `server.py` | 入口与生命周期：装配组件、启动 aiohttp、优雅关闭 |
 | `config.py` | dataclass 默认配置 + 可选 `config.json` 覆盖（命令行 > 配置文件 > 默认值） |
 | `core/` | 状态存储（单写者，工作线程投递 → 事件循环仲裁）、多源仲裁、/query 负载、指标 |
@@ -163,7 +167,7 @@ url = f"https://music.163.com/api/song/lyric?id={song_id}&lv=-1&kv=-1&tv=-1"
 }
 ```
 
-前端逻辑（`wallpaper/src/player/MusicState.ts` 等）：
+旧版 Web 壁纸前端逻辑见 [Wallpaper Engine 分支的客户端源码](https://github.com/ningjx/lyric-wallpaper/tree/codex/wallpaper-engine/wallpaper/src)。
 - 每 200ms 轮询 `/query`，用 `seekbarCurrentPosition` 校准本地 SyncClock
 - `track.id:track.title` 组合键判断切歌 → 切歌时请求 `/api/lyric`
 - `player.hasSong == false` → 清空歌词隐藏场景

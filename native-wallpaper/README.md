@@ -2,7 +2,7 @@
 
 ## 运行发布包
 
-解压 `release/LyricWallpaper-win-x64.zip`，启动目录里的 `NativeWallpaper.exe`。右键托盘图标选择「打开设置」，也可以双击图标打开主窗口。托盘菜单提供播放状态、歌词服务设置、重启歌词服务、开机自启、日志目录、关于和退出。程序在主屏显示，运行中请保留解压出的完整目录。
+解压原生版发布包 `LyricWallpaper-win-x64.zip`，启动目录里的 `NativeWallpaper.exe`。右键托盘图标选择「打开设置」，也可以双击图标打开主窗口。托盘菜单提供播放状态、歌词服务设置、重启歌词服务、开机自启、日志目录、关于和退出。程序在主屏显示，运行中请保留解压出的完整目录。
 
 - **壁纸**按背景、歌词排版、空间层次、玻璃、高光与阴影分组。可以选择单张图片或随机轮播文件夹，调整背景布局、缩放和位置，以及歌词对齐、滚动和玻璃效果。改动即时应用到桌面，并自动写入 `%LOCALAPPDATA%\LyricServer\wallpaper.json`。
 - **测试滚动**可以从设置窗口标题区或托盘菜单开启。演示歌词和译文会在桌面上循环滚动，方便一边改参数一边看效果。关闭后恢复播放器歌词或时钟，每次启动默认关闭测试模式。
@@ -13,7 +13,7 @@
 
 ## 构建与开发
 
-在安装了 Python 和 .NET 10 SDK 的 Windows x64 机器上执行以下命令。构建脚本使用仓库现有的 PyInstaller 构建入口，发布包包含两套运行时。
+在安装了 Python 3.14 和 .NET 10 SDK 的 Windows x64 机器上执行以下命令。脚本会打包 Python 采集进程，并生成包含两套运行时的 `release/LyricWallpaper-win-x64.zip`。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/build-native-wallpaper.ps1
@@ -67,7 +67,7 @@ GTX 1060 5GB，主屏 1920 × 1080，桌面图标后方的 DXGI blt 路径。每
 
 以下是接入采集前的固定歌词原型基线。机器为 Windows 11 Build 26300.9457、GTX 1060 5GB、1920 × 1080 / 100 Hz。原型通过 `Progman` 层使用 DXGI blt 呈现，62 秒内的 62 次层级检查全部通过，滚动提交间隔 P50 为 10.0 ms，P95 为 19.7 ms。
 
-使用 Wallpaper Engine 2.8.42 的 `openWallpaper -playInWindow` 和原型的 `--preview`，在同一台机器上分别以实际画布 1920 × 1080、显示器 100 Hz 运行。对照来自当前仓库的 Vite 构建临时副本，分别启用内置的 `demo` 和 `still` 场景。CEF 报告的 WebGL 后端是同一张 GTX 1060 上的 ANGLE D3D11。每组预热后取约 30 秒 Windows 进程及 GPU 计数器。Wallpaper Engine 统计纳入主进程及对照窗口的五个 CEF 进程，原有壁纸的独立 CEF 进程组未计入。表格统计的是测试应用进程。 [Wallpaper Engine 命令行说明](https://help.wallpaperengine.io/en/functionality/cli.html)
+使用 Wallpaper Engine 2.8.42 的 `openWallpaper -playInWindow` 和原型的 `--preview`，在同一台机器上分别以实际画布 1920 × 1080、显示器 100 Hz 运行。对照来自迁移前的 Vite 构建临时副本，分别启用内置的 `demo` 和 `still` 场景。CEF 报告的 WebGL 后端是同一张 GTX 1060 上的 ANGLE D3D11。每组预热后取约 30 秒 Windows 进程及 GPU 计数器。Wallpaper Engine 统计纳入主进程及对照窗口的五个 CEF 进程，原有壁纸的独立 CEF 进程组未计入。表格统计的是测试应用进程。 [Wallpaper Engine 命令行说明](https://help.wallpaperengine.io/en/functionality/cli.html)
 
 | 指标 | Wallpaper Engine 滚动 | 原型滚动 | Wallpaper Engine 静止 | 原型静止 |
 | --- | ---: | ---: | ---: | ---: |
