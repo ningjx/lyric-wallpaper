@@ -7,7 +7,19 @@
 >
 > 本项目以 [Apache License 2.0](LICENSE) 发布；上游项目的版权与许可证声明仍分别适用于其对应代码。
 
-面向 [Wallpaper Engine](https://www.wallpaperengine.io/) 的本地动态歌词壁纸：WebGL 壁纸读取本机 Now Playing API 的播放状态与歌词，将歌词、玻璃折射和随机背景合成为桌面效果。仓库自带的 Python 服务可读取网易云音乐或 Microsoft Store 版 Apple Music；也可直接使用 [Widdit/now-playing-service](https://github.com/Widdit/now-playing-service)。
+## Windows 原生版
+
+原生版以一个托盘入口运行 C# / D3D11 壁纸与歌词采集。启动 `NativeWallpaper.exe` 后，壁纸显示在主屏的桌面图标后方，程序自动启动采集进程并通过私有管道接收播放状态。采集支持网易云音乐和 Microsoft Store 版 Apple Music，复用本仓库的歌词匹配和缓存。
+
+在 Windows x64 上用 Python 和 .NET 10 SDK 构建发布包，解压 `release/LyricWallpaper-win-x64.zip` 后打开目录内的 `NativeWallpaper.exe`。发布包已包含两套运行时。 [原生版使用说明](native-wallpaper/README.md)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build-native-wallpaper.ps1
+```
+
+## Wallpaper Engine 版
+
+[Wallpaper Engine](https://www.wallpaperengine.io/) 版使用 WebGL 渲染器和本机 Now Playing API，将歌词、玻璃折射和随机背景合成为桌面效果。可用本仓库的 Python 服务，也可使用 [Widdit/now-playing-service](https://github.com/Widdit/now-playing-service)。
 
 ![演示图片](https://raw.githubusercontent.com/ningjx/lyric-wallpaper/refs/heads/main/docs/Snipaste_2026-09-06_11-00-27.png)
 
@@ -38,6 +50,7 @@
 | 目录 | 用途 |
 |---|---|
 | `server/` | Windows 本地播放状态和歌词服务；详见 [server/README.md](server/README.md) |
+| `native-wallpaper/` | C# / D3D11 原生壁纸、托盘和采集进程管理 |
 | `wallpaper/` | Vite + TypeScript 壁纸源码 |
 | `wallpaper/vendor/liquid-glass-webgl` | 液态玻璃 renderer 子模块（维护 fork） |
 | `docs/` | 性能、架构与失败实验记录 |
