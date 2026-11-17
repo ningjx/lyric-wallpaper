@@ -59,10 +59,14 @@ jobs:
           name: lyric-wallpaper-win-x64
           path: release
 
-      - name: Create release and upload assets
+      - name: Publish Windows release
         uses: softprops/action-gh-release@v3
         with:
+          name: "歌词壁纸 ${{ github.ref_name }} · Windows 独立版"
+          body: |
+            下载 `LyricWallpaper-win-x64.zip`，完整解压后运行 `NativeWallpaper.exe`。双击托盘图标打开设置。
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             release/LyricWallpaper-win-x64.zip
             THIRD_PARTY_NOTICES.md

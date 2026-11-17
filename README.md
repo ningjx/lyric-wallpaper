@@ -4,7 +4,7 @@
 
 ## 开始使用
 
-1. 在 [GitHub Releases](https://github.com/ningjx/lyric-wallpaper/releases) 找到原生版的 `LyricWallpaper-win-x64.zip`。如果 Releases 里还没有这个文件，可按下方步骤从源码构建。
+1. [下载 Windows x64 独立版](https://github.com/ningjx/lyric-wallpaper/releases/latest/download/LyricWallpaper-win-x64.zip)，或在 [GitHub Releases](https://github.com/ningjx/lyric-wallpaper/releases) 查看版本记录。
 2. 解压完整目录，运行 `NativeWallpaper.exe`。发布包内含程序和歌词采集所需的运行时。
 3. 双击托盘图标，或右键选择「打开设置」。修改背景、歌词排版、DPR 和玻璃材质会实时应用并自动保存。
 
