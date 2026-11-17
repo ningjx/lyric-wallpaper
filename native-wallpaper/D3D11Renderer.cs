@@ -12,7 +12,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         PSSetSamplers = 10, VSSetShader = 11, Draw = 13, Map = 14, Unmap = 15, PSSetConstantBuffers = 16, DrawInstanced = 21,
         IASetPrimitiveTopology = 24, OMSetRenderTargets = 33, RSSetViewports = 44, CopyResource = 47, UpdateSubresource = 48, Flush = 111 }
     private enum SwapChain { Present = 8, GetBuffer = 9, ResizeBuffers = 13 }
-    private const uint Bgra8 = 87;
+    private const uint Bgra8 = 87, R8Unorm = 61;
     private static readonly Guid Texture2DId = new("6f15aaf2-d208-4e89-9ab4-489535d34f9c");
     private static readonly Guid DxgiDeviceId = new("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
     private static readonly Guid DxgiFactory2Id = new("50c83a1c-e072-4c48-87b0-3630fa36a6d0");
@@ -22,7 +22,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
     private readonly record struct BlurKey(BackgroundLayout Layout, int Zoom, int X, int Y, int Radius);
     private BlurKey? cachedBlur;
     private int backgroundWidth, backgroundHeight;
-    public const int SceneVectors = 45;
+    public const int SceneVectors = 61;
     public int OutputWidth { get; }
     public int OutputHeight { get; }
     public int Width { get; private set; }
@@ -92,7 +92,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
             var atlasDescription = new TextureDescription
             {
                 Width = (uint)atlas.Width, Height = (uint)atlas.Height, MipLevels = 1, ArraySize = 1,
-                Format = Bgra8, SampleCount = 1, BindFlags = 8
+                Format = R8Unorm, SampleCount = 1, BindFlags = 8
             };
             atlasTexture = CreateTexture(atlasDescription, null);
             lyrics = CreateTextureView(atlasTexture);
@@ -407,18 +407,15 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         return view;
     }
 
-    public void UpdateTextRow(int slot, Bitmap row)
+    public void UpdateTextRow(int slot, Size size, ReadOnlySpan<byte> mask)
     {
-        var pixels = row.LockBits(new Rectangle(0, 0, row.Width, row.Height),
-            ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-        try
+        fixed (byte* pixels = mask)
         {
-            var box = new Box { Top = (uint)(slot * row.Height), Right = (uint)row.Width,
-                Bottom = (uint)((slot + 1) * row.Height), Back = 1 };
+            var box = new Box { Top = (uint)(slot * size.Height), Right = (uint)size.Width,
+                Bottom = (uint)((slot + 1) * size.Height), Back = 1 };
             ((delegate* unmanaged[Stdcall]<nint, nint, uint, nint, void*, uint, uint, void>)Slot(context, (int)Context.UpdateSubresource))
-                (context, atlasTexture, 0, (nint)(&box), (void*)pixels.Scan0, (uint)pixels.Stride, 0);
+                (context, atlasTexture, 0, (nint)(&box), pixels, (uint)size.Width, 0);
         }
-        finally { row.UnlockBits(pixels); }
     }
 
     private nint CreateShader(byte[] source, string entry, string profile, Device member)

@@ -383,7 +383,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         Integer(grid, "背板内边距", wallpaper.Padding, 0, 160, (s, v) => s with { Padding = v });
         Option(grid, "屏幕对齐", ["居中", "靠左", "靠右"], (int)wallpaper.Alignment,
             (s, v) => s with { Alignment = (LyricAlignment)v });
-        Integer(grid, "文字垂直微调", wallpaper.TextY, -40, 40, (s, v) => s with { TextY = v });
+        Integer(grid, "歌词垂直微调", wallpaper.TextY, -40, 40, (s, v) => s with { TextY = v });
         Integer(grid, "整体水平（%）", wallpaper.Horizontal, -52, 52, (s, v) => s with { Horizontal = v });
         Integer(grid, "整体垂直（%）", wallpaper.Vertical, -56, 56, (s, v) => s with { Vertical = v });
         Decimal(grid, "滚动速度", wallpaper.ScrollSpeed, 2, 20, .1, (s, v) => s with { ScrollSpeed = v });

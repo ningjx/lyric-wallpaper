@@ -1,5 +1,5 @@
 Texture2D<float4> Background : register(t0);
-Texture2D<float4> Lyrics : register(t1);
+Texture2D<float> Lyrics : register(t1);
 Texture2D<float4> BlurTexture : register(t2);
 SamplerState LinearClamp : register(s0);
 
@@ -7,7 +7,7 @@ cbuffer Scene : register(b0)
 {
     float4 View;               // target size, source UV scale (cover)
     float4 Cards[16];          // center XY, half extents
-    float4 Text[16];           // text size XY, opacity, atlas row
+    float4 Text[16];           // visible text size XY, opacity
     float4 Appearance;         // lyric color and glass intensity
     float4 BackgroundTransform; // zoom, XY offset, tile
     float4 Optics;             // height, displacement, blur, corner radius
@@ -18,8 +18,9 @@ cbuffer Scene : register(b0)
     float4 Surface;
     float4 Shadow;
     float4 ShadowShape;        // radius, XY offset, lyrics behind glass
-    float4 Depth;              // far glass opacity, depth enabled, glyph Y offset
+    float4 Depth;              // far glass opacity, depth enabled, card padding in pixels
     float4 BlurPass;           // downsampled target dimensions, radius in render pixels, active
+    float4 GlyphUv[16];        // atlas origin and extent of the visible glyphs
 };
 
 struct Vertex
@@ -124,7 +125,8 @@ float4 CardPixel(Vertex v) : SV_Target
     float strength = lerp(1, lerp(Depth.x, 1, text.z), Depth.y) * Appearance.w;
     float2 halfSize = Cards[v.index].zw;
     float scale = View.y / 1080.0;
-    float radius = max(0, min(Optics.w * scale, min(halfSize.x, halfSize.y) - 1));
+    // The rounded corner must stay outside the rectangle occupied by the glyphs.
+    float radius = max(0, min(min(Optics.w * scale, Depth.z * 3.41421356), min(halfSize.x, halfSize.y) - 1));
     float2 q = abs(v.local) - (halfSize - radius);
     float distance = SignedDistance(v.local, halfSize, radius);
     float coverage = saturate(0.5 - distance);
@@ -158,10 +160,10 @@ float4 CardPixel(Vertex v) : SV_Target
     glass = lerp(glass, Surface.rgb, saturate(Surface.a * strength));
     glass = lerp(glass, HighlightColor.rgb, saturate(shine));
 
-    float2 glyph = (v.local - float2(0, Depth.z * scale) - displacement * ShadowShape.w) / text.xy + 0.5;
-    // Stay within the atlas cell even when sampling just outside the text bounds.
-    float2 uv = float2(saturate(glyph.x), (text.w + saturate(glyph.y)) / 16.0);
-    float mask = Lyrics.Sample(LinearClamp, uv).a * text.z;
+    float2 glyph = (v.local - displacement * ShadowShape.w) / text.xy + 0.5;
+    float4 bounds = GlyphUv[v.index];
+    float2 uv = bounds.xy + saturate(glyph) * bounds.zw;
+    float mask = Lyrics.Sample(LinearClamp, uv) * text.z;
     if (any(glyph < 0) || any(glyph > 1))
         mask = 0;
     glass = lerp(glass, Appearance.rgb, mask);
