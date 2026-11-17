@@ -74,6 +74,14 @@ class StateStore:
         self._snapshots[name] = snap
         self._reconcile()
 
+    def expire_sources(self) -> None:
+        """Run arbitration if the selected source stopped publishing entirely."""
+        if not self.resolved.has_song:
+            return
+        selected = self._snapshots.get(self.resolved.source)
+        if selected is None or time.monotonic() - selected.ts > self.arbiter.max_snapshot_age:
+            self._reconcile()
+
     # ---- 仲裁与广播 ----
     def _reconcile(self) -> None:
         best = self.arbiter.pick(self._snapshots, self._transitions)
@@ -125,7 +133,8 @@ class StateStore:
         ctx.resolve_state = resolve_state
         if not ctx.future.done():
             ctx.future.set_result(None)
-        self._notify_state()
+        if self.track_context is ctx:
+            self._notify_state()
 
     def current_lyric_result(self) -> object:
         ctx = self.track_context

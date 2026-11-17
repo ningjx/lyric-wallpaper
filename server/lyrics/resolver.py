@@ -7,12 +7,12 @@ TrackContext.future 等待本次解析完成，避免前端拿到空的竞态。
 from __future__ import annotations
 
 import asyncio
-from typing import Dict, Optional, Sequence
+from typing import Optional, Sequence
 
 from ..console import console
 from ..core.state import TrackInfo, pseudo_track_id
 from ..core.stats import Metrics
-from ..core.store import StateStore
+from ..core.store import StateStore, TrackContext
 from .cache import LyricsCache
 from .chain import LyricsChain
 from .identities import TrackIdentifiers, TrackMatch, normalize_key
@@ -30,20 +30,32 @@ class ResolverTask:
         self.chain = chain
         self.cache = cache
         self.metrics = metrics
-        self._inflight: Dict[tuple, asyncio.Task] = {}
+        self._inflight: set[asyncio.Task] = set()
 
     def schedule(self, song: str, author: str, duration: float) -> None:
-        """事件循环线程调用：若该歌尚未在解析，则启动解析任务。"""
-        key = (song, author)
-        existing = self._inflight.get(key)
-        if existing is not None and not existing.done():
-            return  # 已是进行中，去重
-        self._inflight[key] = asyncio.create_task(
-            self._resolve(song, author, duration))
+        """发布新曲目上下文并取消上一首尚未完成的解析。"""
+        previous = self.store.track_context
+        if previous and not previous.future.done():
+            previous.future.set_result(None)
+        for pending in self._inflight:
+            pending.cancel()
+        ctx = self.store.begin_track_context(song, author, duration)
+        task = asyncio.create_task(self._resolve(ctx))
+        self._inflight.add(task)
+        task.add_done_callback(self._inflight.discard)
+
+    async def stop(self) -> None:
+        ctx = self.store.track_context
+        if ctx and not ctx.future.done():
+            ctx.future.set_result(None)
+        tasks = tuple(self._inflight)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     # ---- 内部 ----
-    async def _resolve(self, song: str, author: str, duration: float) -> None:
-        ctx = self.store.begin_track_context(song, author, duration)
+    async def _resolve(self, ctx: TrackContext) -> None:
+        song, author, duration = ctx.song, ctx.author, ctx.duration
         ids = TrackIdentifiers(title=song, artist=author, duration=duration)
         track_info: Optional[TrackInfo] = None
         result: Optional[LyricsResult] = None
@@ -109,4 +121,3 @@ class ResolverTask:
                 self.metrics.incr("resolve." + state)
             self.store.finish_track_context(
                 ctx, ids, track_info, result, state)
-            self._inflight.pop((song, author), None)

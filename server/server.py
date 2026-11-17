@@ -119,6 +119,8 @@ async def serve(
     *,
     on_started: Callable[[], None] | None = None,
     console_status: bool = True,
+    start_http: bool = True,
+    on_snapshot: Callable[[StateStore], None] | None = None,
 ) -> None:
     """运行服务直到 ``stop_event`` 被置位。
 
@@ -155,6 +157,10 @@ async def serve(
     last = {"song": None, "resolve": "idle"}
 
     def on_state() -> None:
+        if on_snapshot is not None and not stop_event.is_set():
+            on_snapshot(store)
+        if not start_http:
+            return
         res = store.resolved
         if not res.has_song:
             console.set_window_title(CONSOLE_TITLE)
@@ -170,8 +176,9 @@ async def serve(
     def on_song(song: str, author: str, duration: float) -> None:
         console.set_window_title(player_console_title(song, author))
         resolver.schedule(song, author, duration)  # 切歌才解析歌词
-        last["song"] = (song, author)
-        hub.publish({"type": "song", "state": _state_snapshot(store)})
+        if start_http:
+            last["song"] = (song, author)
+            hub.publish({"type": "song", "state": _state_snapshot(store)})
 
     store.attach(on_state, on_song)
 
@@ -206,33 +213,43 @@ async def serve(
 
     # ---- 数据源（工作线程 → 事件循环桥） ----
     def publish(name: str, snap) -> None:
-        loop.call_soon_threadsafe(store.push_source, name, snap)
+        if not stop_event.is_set():
+            loop.call_soon_threadsafe(store.push_source, name, snap)
 
     sources = build_sources(cfg, publish)
-    app = create_app(cfg, store, resolver, metrics, sources, hub, http)
-
     runner = None
     try:
+        if on_snapshot is not None:
+            on_snapshot(store)
         start_all(sources)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        await web.TCPSite(runner, cfg.http.host, cfg.http.port).start()
+        if start_http:
+            app = create_app(cfg, store, resolver, metrics, sources, hub, http)
+            runner = web.AppRunner(app)
+            await runner.setup()
+            await web.TCPSite(runner, cfg.http.host, cfg.http.port).start()
 
-        console.log(f"Now Playing API 异步服务已启动: "
-                    f"http://{cfg.http.host}:{cfg.http.port}")
-        console.log("  端点: /query (状态)  /api/lyric (歌词)  "
-                    "/sse (推送)  /healthz /metrics (诊断)")
+            console.log(f"Now Playing API 异步服务已启动: "
+                        f"http://{cfg.http.host}:{cfg.http.port}")
+            console.log("  端点: /query (状态)  /api/lyric (歌词)  "
+                        "/sse (推送)  /healthz /metrics (诊断)")
+            console.log("按 Ctrl+C 停止")
         console.log("  歌词源: " + ", ".join(cfg.lyrics.provider_order))
         console.log("  数据源: Apple Music SMTC / 网易云内存读取")
-        console.log("按 Ctrl+C 停止")
 
         if on_started is not None:
             on_started()
-        await stop_event.wait()
+        check_interval = max(.1, min(1.0, arbiter.max_snapshot_age / 2))
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), check_interval)
+            except asyncio.TimeoutError:
+                store.expire_sources()
     finally:
+        stop_event.set()
         if status_task is not None:
             status_task.cancel()
         stop_all(sources)
+        await resolver.stop()
         if runner is not None:
             await runner.cleanup()
         await http.close()

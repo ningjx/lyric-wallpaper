@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NuGetAudit>false</NuGetAudit>
+    <ApplicationIcon>../server/assets/LyricServer.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="System.IO" />
+    <None Update="Glass.hlsl" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../wallpaper/public/backgrounds/wallhaven-vpolwm.jpg"
+             Link="background.jpg" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
