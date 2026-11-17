@@ -315,16 +315,41 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
     private W.FrameworkElement MakeBackground()
     {
         var grid = Fields();
-        string image = wallpaper.Background, directory = wallpaper.BackgroundDirectory;
-        var fileLabel = PathLabel(image, "纯色背景");
-        var folderLabel = PathLabel(directory, "未设置轮播文件夹");
-        void ApplyPaths()
+        var source = PathLabel("", "纯色背景");
+        void ShowSource(string image, string directory)
+        {
+            bool rotating = directory.Length != 0;
+            string path = rotating ? directory : image;
+            source.Text = path.Length == 0 ? "纯色背景" : (rotating ? "轮播 · " : "单图 · ") + path;
+            source.ToolTip = path.Length == 0 ? null : path;
+        }
+        void SelectSource(string image, string directory)
         {
             QueueWallpaper(s => s with { Background = image, BackgroundDirectory = directory });
-            SetPath(fileLabel, image, "纯色背景");
-            SetPath(folderLabel, directory, "未设置轮播文件夹");
+            ShowSource(image, directory);
         }
-        AddField(grid, "背景图片", Inline(fileLabel, Button("选择…", () =>
+        ShowSource(wallpaper.Background, wallpaper.BackgroundDirectory);
+
+        var menu = new Ui.ContextMenu { FontFamily = FontFamily, FontSize = FontSize };
+        SettingsTheme.Apply(menu);
+        menu.Style = (W.Style)menu.FindResource("TrayMenuStyle");
+        var itemStyle = (W.Style)menu.FindResource("TrayMenuItemStyle");
+        void AddSourceAction(string label, Fluent.SymbolRegular icon, Action action)
+        {
+            var item = new Ui.MenuItem
+            {
+                Header = label, Style = itemStyle, Icon = new Fluent.SymbolIcon { Symbol = icon, FontSize = 16 }
+            };
+            item.Click += (_, _) => TryAction(action);
+            menu.Items.Add(item);
+        }
+        var select = new Fluent.DropDownButton { Content = "选择", Flyout = menu, MinHeight = ControlHeight };
+        W.Automation.AutomationProperties.SetName(select, "选择背景来源");
+        menu.PlacementTarget = select;
+        menu.Placement = Ui.Primitives.PlacementMode.Bottom;
+        select.Click += (_, _) => menu.IsOpen = true;
+
+        AddSourceAction("选择图片…", Fluent.SymbolRegular.Image24, () =>
         {
             var picker = new Microsoft.Win32.OpenFileDialog
             {
@@ -333,26 +358,14 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
             };
             if (picker.ShowDialog(this) != true) return;
             using var checkedImage = wallpaper.LoadBackground(picker.FileName);
-            image = picker.FileName;
-            directory = "";
-            ApplyPaths();
-        }), Button("纯色", () =>
+            SelectSource(picker.FileName, "");
+        });
+        AddSourceAction("选择文件夹…", Fluent.SymbolRegular.FolderOpen20, () =>
         {
-            image = "";
-            directory = "";
-            ApplyPaths();
-        })), full: true);
-        AddField(grid, "随机轮播文件夹", Inline(folderLabel, Button("选择…", () =>
-        {
-            string? result = PickFolder("选择轮播文件夹");
-            if (result is null) return;
-            directory = result;
-            ApplyPaths();
-        }), Button("关闭", () =>
-        {
-            directory = "";
-            ApplyPaths();
-        })), full: true);
+            if (PickFolder("选择轮播文件夹") is { } directory) SelectSource("", directory);
+        });
+        AddSourceAction("纯色背景", Fluent.SymbolRegular.PaintBucket20, () => SelectSource("", ""));
+        AddField(grid, "背景来源", Inline(source, select), full: true);
         Option(grid, "布局", ["裁切填充", "完整显示", "拉伸", "平铺"], (int)wallpaper.Layout,
             (s, v) => s with { Layout = (BackgroundLayout)v });
         Integer(grid, "轮播间隔（秒）", wallpaper.RotationSeconds, 10, 3600, (s, v) => s with { RotationSeconds = v }, 10);

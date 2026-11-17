@@ -202,7 +202,9 @@ internal sealed class LyricScene : IDisposable
         int end = Math.Min(frame.Lines.Length, (int)Math.Floor(focus + settings.RenderDistance) + 1);
         if (end <= first) return 0;
 
-        float originY = height * (.5f + settings.Vertical / 100f + settings.TextY / 1080f);
+        float originY = frame.IsIdleClock ? height / 2f : height * (.5f + settings.Vertical / 100f + settings.TextY / 1080f);
+        var alignment = frame.IsIdleClock ? LyricAlignment.Center : settings.Alignment;
+        float horizontalOffset = frame.IsIdleClock ? 0 : width * settings.Horizontal / 100f;
         int active = Math.Clamp((int)Math.Round(focus), first, end - 1);
         int count = 0;
         // Draw the closest line last, above the cards and shadows of surrounding lines.
@@ -227,13 +229,13 @@ internal sealed class LyricScene : IDisposable
             var inkSize = entry.InkSize * (font / AtlasFont);
             var half = inkSize / 2 + new Vector2(padding);
             if (y + half.Y <= 0 || y - half.Y >= height) continue;
-            float x = settings.Alignment switch
+            float x = alignment switch
             {
                 LyricAlignment.Left => half.X + width * .075f,
                 LyricAlignment.Right => width * .925f - half.X,
                 _ => width / 2f
             };
-            x += width * settings.Horizontal / 100f;
+            x += horizontalOffset;
             scene[1 + count] = new(x, y, half.X, half.Y);
             scene[17 + count] = new(inkSize, alpha * settings.Opacity / 100f, 0);
             scene[45 + count] = entry.Uv;

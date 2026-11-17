@@ -3,7 +3,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 
 internal readonly record struct LyricLine(double Time, string Text, string? Translation = null, bool IsMetadata = false);
-internal readonly record struct LyricFrame(LyricLine[] Lines, double Focus, bool Moving, double Next);
+internal readonly record struct LyricFrame(LyricLine[] Lines, double Focus, bool Moving, double Next, bool IsIdleClock = false);
 
 internal sealed partial class LyricTimeline
 {
@@ -67,7 +67,7 @@ internal sealed partial class LyricTimeline
                 clockMinute = minute;
                 idle = [new LyricLine(0, time.ToString("HH:mm"), time.ToString("M月d日 dddd", CultureInfo.GetCultureInfo("zh-CN")), true)];
             }
-            return new LyricFrame(idle, 0, false, now + 60 - (time - minute).TotalSeconds);
+            return new LyricFrame(idle, 0, false, now + 60 - (time - minute).TotalSeconds, IsIdleClock: true);
         }
 
         double position = PositionAt(sample) + settings.OffsetMs / 1000d + (sample.Playing ? lead : 0);
