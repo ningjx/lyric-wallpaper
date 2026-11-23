@@ -23,8 +23,6 @@ internal sealed class ClockDefinition : WidgetDefinition
     public const string TypeId = "clock";
     public override string Type => TypeId;
     public override string Title => "时钟";
-    public override string Category => "时间和日期";
-    public override string Icon => "Clock24";
     public override WidgetVisibility DefaultVisibility => WidgetVisibility.Always;
     public override WidgetOptions DefaultOptions { get; } = new ClockOptions();
 

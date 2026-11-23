@@ -1,6 +1,7 @@
 using System.Text.Json;
 using LyricWallpaper.Platform.Windows;
 using LyricWallpaper.Playback;
+using LyricWallpaper.Scene;
 using LyricWallpaper.Storage;
 using LyricWallpaper.Wallpaper;
 using LyricWallpaper.Widgets;
@@ -36,10 +37,10 @@ internal static class Program
             WidgetDocument widgets = !options.Demo || options.EditWidgets ? widgetStore.Load() : catalog.DefaultDocument();
             bool testScroll = playback is not null && options.TestScroll;
             RenderReport Render(Action<RenderControls>? ready, Action<PlaybackSnapshot?>? status,
-                Action<WidgetEditorLayout>? editor, Action<WidgetHold>? hold, CancellationToken stop) =>
+                Action<WidgetEditorLayout>? editor, Action<WidgetPreviewFrame[]>? previews, Action<WidgetHold>? hold, CancellationToken stop) =>
                 DesktopScene.Run(options, reportPath is not null, playback, appearance, catalog, widgets, testScroll,
-                    ready, status, editor, hold, stop);
-            var report = playback is null && !options.EditWidgets ? Render(null, null, null, null, default)
+                    ready, status, editor, previews, hold, stop);
+            var report = playback is null && !options.EditWidgets ? Render(null, null, null, null, null, default)
                 : DesktopApplication.Run(wallpaperStore, playbackStore, widgetStore, catalog, playback, appearance,
                     testScroll, options.Settings, options.EditWidgets, Render);
             WriteReport(reportPath, report);

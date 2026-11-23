@@ -2,6 +2,7 @@ using System.Windows.Threading;
 using LyricWallpaper.Platform.Windows;
 using LyricWallpaper.Playback;
 using LyricWallpaper.Presentation;
+using LyricWallpaper.Scene;
 using LyricWallpaper.Storage;
 using LyricWallpaper.Wallpaper;
 using LyricWallpaper.Widgets;
@@ -13,7 +14,8 @@ internal static class DesktopApplication
     public static RenderReport Run(WallpaperStore wallpaperStore, PlaybackSettingsStore playbackStore, WidgetStore widgetStore,
         WidgetCatalog catalog, LyricsService? worker, WallpaperSettings appearance,
         bool testing, bool openSettings, bool openEditor,
-        Func<Action<RenderControls>, Action<PlaybackSnapshot?>, Action<WidgetEditorLayout>, Action<WidgetHold>, CancellationToken, RenderReport> render)
+        Func<Action<RenderControls>, Action<PlaybackSnapshot?>, Action<WidgetEditorLayout>, Action<WidgetPreviewFrame[]>,
+            Action<WidgetHold>, CancellationToken, RenderReport> render)
     {
         var ui = Dispatcher.CurrentDispatcher;
         DesktopTray? tray = null;
@@ -35,7 +37,8 @@ internal static class DesktopApplication
             {
                 finished.SetResult(render(ready.SetResult,
                     sample => ui.BeginInvoke(new Action(() => tray?.Update(sample))),
-                    PublishLayout, hold => ui.BeginInvoke(new Action(() => openFromWidget?.Invoke(hold))), stop.Token));
+                    PublishLayout, previews => ui.BeginInvoke(DispatcherPriority.Background, new Action(() => editor?.ShowDockPreviews(previews))),
+                    hold => ui.BeginInvoke(new Action(() => openFromWidget?.Invoke(hold))), stop.Token));
             }
             catch (Exception ex)
             {
@@ -93,7 +96,7 @@ internal static class DesktopApplication
                     {
                         if (save) widgetStore.Save(next);
                         OnRender(() => controls.ApplyWidgets(next));
-                    }, id => OnRender(() => controls.SetDragging(id)));
+                    }, id => OnRender(() => controls.SetDragging(id)), visible => OnRender(() => controls.ShowDockPreviews(visible)));
                     overlay.Closed += (_, _) =>
                     {
                         editor = null;

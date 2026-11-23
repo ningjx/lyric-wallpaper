@@ -18,17 +18,19 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         CopyResource = 47, UpdateSubresource = 48, Flush = 111 }
     private enum SwapChain { Present = 8, GetBuffer = 9, ResizeBuffers = 13 }
     private const uint Bgra8 = 87, R8Unorm = 61;
+    private const int PreviewWidth = 384, PreviewHeight = 216;
     private static readonly Guid Texture2DId = new("6f15aaf2-d208-4e89-9ab4-489535d34f9c");
     private static readonly Guid DxgiDeviceId = new("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
     private static readonly Guid DxgiFactory2Id = new("50c83a1c-e072-4c48-87b0-3630fa36a6d0");
     private nint device, context, chain, target, constants, sampler, background, lyrics, atlasTexture;
     private nint backgroundVs, backgroundPs, cardVs, cardPs, blurHorizontalPs, blurVerticalPs;
     private nint widgetPs, widgetBlend;
+    private nint previewBackgroundPs, previewWidgetPs, previewTexture, previewTarget, previewStaging;
     private (nint Target, nint Input) blurHorizontal, blurVertical;
     private readonly record struct BlurKey(BackgroundLayout Layout, int Zoom, int X, int Y, int Radius);
     private BlurKey? cachedBlur;
     private int backgroundWidth, backgroundHeight;
-    public const int SceneVectors = 61;
+    public const int SceneVectors = 62;
     public int OutputWidth { get; }
     public int OutputHeight { get; }
     public int Width { get; private set; }
@@ -70,10 +72,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
             Adapter = ReadAdapter();
             target = CreateBackBufferTarget();
 
-            using var shader = typeof(D3D11Renderer).Assembly.GetManifestResourceStream("Glass.hlsl")
-                ?? throw new InvalidOperationException("找不到内置玻璃着色器。");
-            var source = new byte[shader.Length];
-            shader.ReadExactly(source);
+            var source = ReadShaderSource();
             backgroundVs = CreateShader(source, "BackgroundVertex", "vs_5_0", Device.CreateVertexShader);
             backgroundPs = CreateShader(source, "BackgroundPixel", "ps_5_0", Device.CreatePixelShader);
             cardVs = CreateShader(source, "CardVertex", "vs_5_0", Device.CreateVertexShader);
@@ -119,6 +118,15 @@ internal sealed unsafe class D3D11Renderer : IDisposable
             Dispose();
             throw;
         }
+    }
+
+    private static byte[] ReadShaderSource()
+    {
+        using var shader = typeof(D3D11Renderer).Assembly.GetManifestResourceStream("Glass.hlsl")
+            ?? throw new InvalidOperationException("找不到内置玻璃着色器。");
+        var source = new byte[shader.Length];
+        shader.ReadExactly(source);
+        return source;
     }
 
     private (int Width, int Height) ScaledSize(double scale)
@@ -168,11 +176,54 @@ internal sealed unsafe class D3D11Renderer : IDisposable
 
     public bool Draw(SceneFrame frame, string? capturePath)
     {
-        var view = frame.Style.Background;
-        var material = frame.Style.Glass;
-        var lyricsStyle = frame.Style.Lyrics;
-        uint cardCount = (uint)frame.Lyrics.Count;
         Span<Vector4> scene = stackalloc Vector4[SceneVectors];
+        bool sampleBlur = PrepareScene(scene, frame.Style, frame.Lyrics, frame.Widgets.Count > 0);
+
+        // Flip-model Present unbinds the back buffer, so bind it again each frame.
+        SetTarget(target);
+        SetViewport(Width, Height);
+        if (sampleBlur) SetBlurInput(blurVertical.Input);
+        DrawBackground(backgroundPs);
+        if (frame.Lyrics.Count != 0) DrawCards(cardPs, (uint)frame.Lyrics.Count);
+        if (frame.Widgets.Count > 0)
+        {
+            SetBlend(widgetBlend);
+            foreach (var card in frame.Widgets) DrawWidget(scene, card, frame.Style.Glass.Strength, widgetPs);
+            SetBlend(0);
+        }
+        if (capturePath is not null) SaveFrame(capturePath);
+        int result = ((delegate* unmanaged[Stdcall]<nint, uint, uint, int>)Slot(chain, (int)SwapChain.Present))(chain, 1, 0);
+        Check(result, "present");
+        return result != 0x087A0001; // DXGI_STATUS_OCCLUDED
+    }
+
+    public WidgetPreviewFrame DrawWidgetPreview(string type, SceneStyle style, GlassCard card)
+    {
+        EnsurePreviewResources();
+        // Sample a crop around the real card geometry and leave space for its shadow.
+        float step = Math.Max(2 * card.Half.X / (.78f * PreviewWidth), 2 * card.Half.Y / (.70f * PreviewHeight));
+        var origin = card.Center - new Vector2(PreviewWidth, PreviewHeight) * (step / 2);
+        Span<Vector4> scene = stackalloc Vector4[SceneVectors];
+        scene[61] = new(origin, step, step);
+        bool sampleBlur = PrepareScene(scene, style, [], hasWidgets: true);
+
+        SetTarget(previewTarget);
+        SetViewport(PreviewWidth, PreviewHeight);
+        if (sampleBlur) SetBlurInput(blurVertical.Input);
+        DrawBackground(previewBackgroundPs);
+        SetViewport(Width / step, Height / step, -origin.X / step, -origin.Y / step);
+        SetBlend(widgetBlend);
+        DrawWidget(scene, card, style.Glass.Strength, previewWidgetPs);
+        SetBlend(0);
+        SetTarget(0);
+        return new(type, PreviewWidth, PreviewHeight, ReadPreviewPixels());
+    }
+
+    private bool PrepareScene(Span<Vector4> scene, SceneStyle style, IReadOnlyList<GlassCard> lyricsCards, bool hasWidgets)
+    {
+        var view = style.Background;
+        var material = style.Glass;
+        var lyricsStyle = style.Lyrics;
         float imageAspect = (float)backgroundWidth / backgroundHeight;
         float screenAspect = (float)Width / Height;
         float ratio = screenAspect / imageAspect;
@@ -193,11 +244,11 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         scene[40] = PackColor(material.Surface);
         scene[41] = PackColor(material.Shadow.Color);
         scene[42] = new(material.Shadow.Radius, material.Shadow.X, material.Shadow.Y, lyricsStyle.BehindGlass ? 1 : 0);
-        scene[43] = new(lyricsStyle.FarGlass, lyricsStyle.Depth ? 1 : 0, cardCount == 0 ? 0 : frame.Lyrics[0].Padding, 0);
-        for (int i = 0; i < frame.Lyrics.Count; i++) PackCard(scene, i, frame.Lyrics[i]);
+        scene[43] = new(lyricsStyle.FarGlass, lyricsStyle.Depth ? 1 : 0, lyricsCards.Count == 0 ? 0 : lyricsCards[0].Padding, 0);
+        for (int i = 0; i < lyricsCards.Count; i++) PackCard(scene, i, lyricsCards[i]);
         // Preserve the existing full-scene blur rule for the shared glass pipeline.
         bool blurEnabled = material.FullSceneBlur && material.Blur > 0 && !lyricsStyle.BehindGlass && material.Strength > 0;
-        bool sampleBlur = blurEnabled && (cardCount != 0 || frame.Widgets.Count > 0);
+        bool sampleBlur = blurEnabled && (lyricsCards.Count != 0 || hasWidgets);
         int blurWidth = (Width + 1) / 2, blurHeight = (Height + 1) / 2;
         scene[44] = new(blurWidth, blurHeight, material.Blur * Height / 1080f, sampleBlur ? 1 : 0);
         WriteConstants(scene);
@@ -207,32 +258,77 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         else if (!blurEnabled)
             ReleaseBlur();
 
-        // Flip-model Present unbinds the back buffer, so bind it again each frame.
-        SetTarget(target);
-        SetViewport(Width, Height);
-        if (sampleBlur) SetBlurInput(blurVertical.Input);
-        SetShaders(backgroundVs, backgroundPs);
+        return sampleBlur;
+    }
+
+    private void DrawBackground(nint pixelShader)
+    {
+        SetShaders(backgroundVs, pixelShader);
         ((delegate* unmanaged[Stdcall]<nint, uint, uint, void>)Slot(context, (int)Context.Draw))(context, 3, 0);
-        if (cardCount != 0) DrawCards(cardPs, cardCount);
-        if (frame.Widgets.Count > 0)
+    }
+
+    private void DrawWidget(Span<Vector4> scene, GlassCard card, float strength, nint pixelShader)
+    {
+        PackCard(scene, 0, card);
+        scene[33] = PackColor(card.Color, strength);
+        scene[43] = new(1, 0, card.Padding, card.Press);
+        WriteConstants(scene);
+        DrawCards(pixelShader, 1);
+    }
+
+    private void EnsurePreviewResources()
+    {
+        if (previewTarget != 0) return;
+        try
         {
-            Span<Vector4> widget = stackalloc Vector4[SceneVectors];
-            scene.CopyTo(widget);
-            SetBlend(widgetBlend);
-            foreach (var card in frame.Widgets)
+            var shader = ReadShaderSource();
+            previewBackgroundPs = CreateShader(shader, "PreviewBackgroundPixel", "ps_5_0", Device.CreatePixelShader);
+            previewWidgetPs = CreateShader(shader, "PreviewWidgetPixel", "ps_5_0", Device.CreatePixelShader);
+            var description = new TextureDescription
             {
-                PackCard(widget, 0, card);
-                widget[33] = PackColor(card.Color, material.Strength);
-                widget[43] = new(1, 0, card.Padding, card.Press);
-                WriteConstants(widget);
-                DrawCards(widgetPs, 1);
-            }
-            SetBlend(0);
+                Width = PreviewWidth, Height = PreviewHeight, MipLevels = 1, ArraySize = 1,
+                Format = Bgra8, SampleCount = 1, BindFlags = 0x20
+            };
+            previewTexture = CreateTexture(description, null);
+            previewTarget = CreateRenderTarget(previewTexture);
+            description.BindFlags = 0;
+            description.Usage = 3;
+            description.CpuAccess = 0x20000;
+            previewStaging = CreateTexture(description, null);
         }
-        if (capturePath is not null) SaveFrame(capturePath);
-        int result = ((delegate* unmanaged[Stdcall]<nint, uint, uint, int>)Slot(chain, (int)SwapChain.Present))(chain, 1, 0);
-        Check(result, "present");
-        return result != 0x087A0001; // DXGI_STATUS_OCCLUDED
+        catch
+        {
+            ReleasePreviewResources();
+            throw;
+        }
+    }
+
+    private byte[] ReadPreviewPixels()
+    {
+        ((delegate* unmanaged[Stdcall]<nint, nint, nint, void>)Slot(context, (int)Context.CopyResource))
+            (context, previewStaging, previewTexture);
+        Subresource mapped;
+        Check(((delegate* unmanaged[Stdcall]<nint, nint, uint, uint, uint, Subresource*, int>)Slot(context, (int)Context.Map))
+            (context, previewStaging, 0, 1, 0, &mapped), "read widget preview");
+        try
+        {
+            const int stride = PreviewWidth * 4;
+            var pixels = new byte[stride * PreviewHeight];
+            for (int row = 0; row < PreviewHeight; row++)
+                Marshal.Copy(mapped.Memory + row * (int)mapped.RowPitch, pixels, row * stride, stride);
+            return pixels;
+        }
+        finally
+        {
+            ((delegate* unmanaged[Stdcall]<nint, nint, uint, void>)Slot(context, (int)Context.Unmap))(context, previewStaging, 0);
+        }
+    }
+
+    private void ReleasePreviewResources()
+    {
+        foreach (nint resource in new[] { previewBackgroundPs, previewWidgetPs, previewTarget, previewTexture, previewStaging })
+            if (resource != 0) Marshal.Release(resource);
+        previewBackgroundPs = previewWidgetPs = previewTarget = previewTexture = previewStaging = 0;
     }
 
     private static void PackCard(Span<Vector4> constants, int index, GlassCard card)
@@ -403,9 +499,9 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         finally { Marshal.Release(dxgi); }
     }
 
-    private void SetViewport(int width, int height)
+    private void SetViewport(float width, float height, float x = 0, float y = 0)
     {
-        var viewport = new Viewport { Width = width, Height = height, MaxDepth = 1 };
+        var viewport = new Viewport { X = x, Y = y, Width = width, Height = height, MaxDepth = 1 };
         ((delegate* unmanaged[Stdcall]<nint, uint, Viewport*, void>)Slot(context, (int)Context.RSSetViewports))
             (context, 1, &viewport);
     }
@@ -520,6 +616,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
 
     public void Dispose()
     {
+        ReleasePreviewResources();
         ReleaseBlur();
         foreach (nint resource in new[] { context, target, constants, sampler, lyrics, atlasTexture, background,
             cardPs, cardVs, backgroundPs, backgroundVs, blurHorizontalPs, blurVerticalPs, widgetPs, widgetBlend, chain, device })

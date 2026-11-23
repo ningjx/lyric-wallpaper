@@ -21,6 +21,7 @@ cbuffer Scene : register(b0)
     float4 Depth;              // far glass opacity, depth enabled, card padding, clock press
     float4 BlurPass;           // downsampled target dimensions, radius in render pixels, active
     float4 GlyphUv[16];        // atlas origin and extent of the visible glyphs
+    float4 PreviewWindow;      // scene origin and scene pixels per preview pixel
 };
 
 struct Vertex
@@ -56,6 +57,11 @@ Vertex BackgroundVertex(uint id : SV_VertexID)
 float4 BackgroundPixel(Vertex v) : SV_Target
 {
     return float4(SampleBackground(v.position.xy), 1);
+}
+
+float4 PreviewBackgroundPixel(Vertex v) : SV_Target
+{
+    return float4(SampleBackground(PreviewWindow.xy + v.position.xy * PreviewWindow.zw), 1);
 }
 
 float3 BlurSource(float2 uv, bool horizontal)
@@ -181,3 +187,9 @@ float4 GlassPixel(Vertex v, bool overlay)
 
 float4 CardPixel(Vertex v) : SV_Target { return GlassPixel(v, false); }
 float4 WidgetPixel(Vertex v) : SV_Target { return GlassPixel(v, true); }
+
+float4 PreviewWidgetPixel(Vertex v) : SV_Target
+{
+    v.position.xy = PreviewWindow.xy + v.position.xy * PreviewWindow.zw;
+    return GlassPixel(v, true);
+}

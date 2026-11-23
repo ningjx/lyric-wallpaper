@@ -1,7 +1,10 @@
 using W = System.Windows;
 using Controls = System.Windows.Controls;
+using Input = System.Windows.Input;
 using Media = System.Windows.Media;
+using Imaging = System.Windows.Media.Imaging;
 using Fluent = Wpf.Ui.Controls;
+using LyricWallpaper.Scene;
 using LyricWallpaper.Widgets;
 
 namespace LyricWallpaper.Presentation;
@@ -10,12 +13,13 @@ internal sealed class WidgetDock
 {
     private readonly Controls.Grid expanded = new();
     private readonly Fluent.Button expand;
+    private readonly Dictionary<string, Controls.Border> previews = new(StringComparer.Ordinal);
     private bool isExpanded = true;
 
     public Controls.Border View { get; }
     public W.Rect Bounds { get; private set; } = W.Rect.Empty;
 
-    public WidgetDock(WidgetCatalog catalog, bool canAdd, Action<WidgetDefinition> add, Action changed)
+    public WidgetDock(WidgetCatalog catalog, bool canAdd, Action<WidgetDefinition> add, Action<bool> changed)
     {
         View = new Controls.Border
         {
@@ -53,7 +57,7 @@ internal sealed class WidgetDock
         {
             isExpanded = value;
             View.Child = value ? expanded : expand;
-            changed();
+            changed(value);
         }
     }
 
@@ -70,22 +74,30 @@ internal sealed class WidgetDock
         View.Visibility = W.Visibility.Visible;
     }
 
-    private static Fluent.Button Card(WidgetDefinition item, bool enabled, Action click)
+    public void ShowPreviews(IReadOnlyList<WidgetPreviewFrame> frames)
     {
-        var row = new Controls.DockPanel { LastChildFill = true };
-        var symbol = Enum.TryParse<Fluent.SymbolRegular>(item.Icon, out var icon) ? icon : Fluent.SymbolRegular.Add24;
+        foreach (var frame in frames)
+        {
+            if (!previews.TryGetValue(frame.Type, out var tile)) continue;
+            var bitmap = Imaging.BitmapSource.Create(frame.Width, frame.Height, 96, 96, Media.PixelFormats.Bgra32,
+                null, frame.Pixels, frame.Width * 4);
+            bitmap.Freeze();
+            var brush = new Media.ImageBrush(bitmap) { Stretch = Media.Stretch.UniformToFill };
+            brush.Freeze();
+            tile.Background = brush;
+        }
+    }
+
+    private Fluent.Button Card(WidgetDefinition item, bool enabled, Action click)
+    {
         var tile = new Controls.Border
         {
-            Width = 35, Height = 35, Margin = new W.Thickness(0, 0, 9, 0), CornerRadius = new W.CornerRadius(8),
-            Background = Brush(0xFFE4F0FC),
-            Child = new Fluent.SymbolIcon
-            {
-                Symbol = symbol, FontSize = 19, Foreground = Brush(0xFF0067C0),
-                HorizontalAlignment = W.HorizontalAlignment.Center, VerticalAlignment = W.VerticalAlignment.Center
-            }
+            Height = 112, CornerRadius = new W.CornerRadius(6), Background = Brush(0xFF1E2937), SnapsToDevicePixels = true
         };
-        Controls.DockPanel.SetDock(tile, Controls.Dock.Left);
-        row.Children.Add(tile);
+        previews.Add(item.Type, tile);
+        var content = new Controls.StackPanel();
+        content.Children.Add(tile);
+        var row = new Controls.DockPanel { Margin = new W.Thickness(3, 6, 3, 1) };
         var plus = new Fluent.SymbolIcon
         {
             Symbol = Fluent.SymbolRegular.Add16, FontSize = 16, VerticalAlignment = W.VerticalAlignment.Center,
@@ -93,15 +105,16 @@ internal sealed class WidgetDock
         };
         Controls.DockPanel.SetDock(plus, Controls.Dock.Right);
         row.Children.Add(plus);
-        var label = new Controls.StackPanel { VerticalAlignment = W.VerticalAlignment.Center };
-        label.Children.Add(new Controls.TextBlock { Text = item.Title, FontWeight = W.FontWeights.SemiBold });
-        label.Children.Add(new Controls.TextBlock { Text = item.Category, FontSize = 11, Foreground = Brush(0xFF596679) });
-        row.Children.Add(label);
+        row.Children.Add(new Controls.TextBlock
+        {
+            Text = item.Title, FontWeight = W.FontWeights.SemiBold, VerticalAlignment = W.VerticalAlignment.Center
+        });
+        content.Children.Add(row);
         var button = new Fluent.Button
         {
-            Content = row, Padding = new W.Thickness(9, 8, 9, 8), MinHeight = 52, IsEnabled = enabled,
+            Content = content, Padding = new W.Thickness(5), IsEnabled = enabled, Cursor = Input.Cursors.Hand,
             HorizontalAlignment = W.HorizontalAlignment.Stretch, HorizontalContentAlignment = W.HorizontalAlignment.Stretch,
-            Appearance = Fluent.ControlAppearance.Secondary, Margin = new W.Thickness(0, 0, 0, 6)
+            Appearance = Fluent.ControlAppearance.Secondary, Margin = new W.Thickness(0, 0, 0, 8)
         };
         W.Automation.AutomationProperties.SetName(button, "添加" + item.Title);
         button.Click += (_, _) => click();

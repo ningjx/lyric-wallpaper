@@ -28,8 +28,6 @@ internal abstract class WidgetDefinition
 {
     public abstract string Type { get; }
     public abstract string Title { get; }
-    public abstract string Category { get; }
-    public abstract string Icon { get; }
     public abstract WidgetVisibility DefaultVisibility { get; }
     public abstract WidgetOptions DefaultOptions { get; }
     public abstract WidgetOptions NormalizeOptions(WidgetOptions options);

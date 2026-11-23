@@ -60,7 +60,7 @@ internal sealed class WidgetEditorWindow : W.Window
     private bool IsInteracting => gesture is not null || propertyDrag is not null;
 
     public WidgetEditorWindow(WidgetDocument document, WidgetHold? hold, WidgetCatalog catalog,
-        Action<WidgetDocument, bool> apply, Action<Guid?> setDragging)
+        Action<WidgetDocument, bool> apply, Action<Guid?> setDragging, Action<bool> showDockPreviews)
     {
         session = new(document, hold?.Id, apply);
         continuedHold = hold;
@@ -154,7 +154,11 @@ internal sealed class WidgetEditorWindow : W.Window
             if (ReferenceEquals(propertyDrag?.Thumb, e.OriginalSource)) FinishPropertyDrag(e.Canceled);
         }), true);
         canvas.Children.Add(propertyPanel);
-        dock = new WidgetDock(catalog, session.CanEdit, AddWidget, LayoutParts);
+        dock = new WidgetDock(catalog, session.CanEdit, AddWidget, visible =>
+        {
+            LayoutParts();
+            showDockPreviews(visible);
+        });
         canvas.Children.Add(dock.View);
         SourceInitialized += (_, _) => hwnd = new WindowInteropHelper(this).Handle;
         Loaded += (_, _) =>
@@ -197,6 +201,8 @@ internal sealed class WidgetEditorWindow : W.Window
         iconTimer.Start();
         UpdateProperties();
     }
+
+    public void ShowDockPreviews(WidgetPreviewFrame[] frames) => dock.ShowPreviews(frames);
 
     public void Place(WidgetEditorLayout next)
     {

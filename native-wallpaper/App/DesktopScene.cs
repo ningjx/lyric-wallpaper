@@ -13,7 +13,8 @@ internal static class DesktopScene
 {
     public static RenderReport Run(LaunchOptions options, bool measure, LyricsService? playback, WallpaperSettings appearance,
         WidgetCatalog catalog, WidgetDocument initialWidgets, bool startTest, Action<RenderControls>? ready,
-        Action<PlaybackSnapshot?>? updateStatus, Action<WidgetEditorLayout>? updateEditor, Action<WidgetHold>? openFromWidget,
+        Action<PlaybackSnapshot?>? updateStatus, Action<WidgetEditorLayout>? updateEditor,
+        Action<WidgetPreviewFrame[]>? updateDockPreviews, Action<WidgetHold>? openFromWidget,
         CancellationToken stop)
     {
         using var wallpaper = new WallpaperSession(appearance, options.Demo, options.Still, options.Fps, startTest);
@@ -23,6 +24,7 @@ internal static class DesktopScene
         using var process = Process.GetCurrentProcess();
         using var wait = new DesktopWindow.MessageWait();
         var content = new WidgetScene(catalog);
+        var dockPreviews = new WidgetDockPreviews(catalog);
         var feedback = new WidgetPressFeedback();
         var lyrics = new List<GlassCard>();
         var cards = new List<GlassCard>();
@@ -33,7 +35,7 @@ internal static class DesktopScene
         D3D11Renderer? renderer = null;
         Guid? dragging = null, presentedFeedback = null;
         float presentedPress = 0;
-        bool editing = false, lastAnimate = true, dirty = true, dirtyWidgets = true;
+        bool editing = false, showDockPreviews = false, lastAnimate = true, dirty = true, dirtyWidgets = true;
         var report = new RenderReport { Preview = options.Preview, Still = options.Still, FpsLimit = wallpaper.Fps };
         var intervals = measure ? new List<double>() : null;
         var clock = Stopwatch.StartNew();
@@ -50,6 +52,8 @@ internal static class DesktopScene
             input.Reset();
             dragging = null;
             editing = enabled;
+            showDockPreviews = enabled;
+            if (enabled) dockPreviews.Invalidate();
             lastLayout = null;
             dirty = true;
             return widgets;
@@ -71,8 +75,16 @@ internal static class DesktopScene
 
         void ApplyAppearance(WallpaperSettings next)
         {
+            var previousStyle = wallpaper.Style;
+            var previousBackground = wallpaper.Background;
+            double previousScale = wallpaper.Appearance.RenderScale;
             wallpaper.Apply(next, clock.Elapsed.TotalSeconds, scale => renderer?.ChangeRenderScale(scale),
                 image => renderer?.ChangeBackground(image));
+            var currentStyle = wallpaper.Style;
+            if (!ReferenceEquals(previousBackground, wallpaper.Background) || previousScale != next.RenderScale ||
+                previousStyle.Background != currentStyle.Background || previousStyle.Glass != currentStyle.Glass ||
+                previousStyle.Lyrics.BehindGlass != currentStyle.Lyrics.BehindGlass)
+                dockPreviews.Invalidate();
             if (renderer is not null)
             {
                 lead = LyricLayer.LeadSeconds(renderer.OutputHeight, next);
@@ -87,7 +99,7 @@ internal static class DesktopScene
         try
         {
             ready?.Invoke(new(Dispatcher.CurrentDispatcher, ApplyAppearance, SetTestMode, SetEditing,
-                next => widgets = next, SetDragging));
+                next => widgets = next, SetDragging, visible => showDockPreviews = editing && visible));
             while (true)
             {
                 Application.DoEvents();
@@ -95,7 +107,11 @@ internal static class DesktopScene
                 if (stop.IsCancellationRequested || (measureFrom >= 0 && now - measureFrom >= options.Duration) ||
                     host.Window?.ClosedByUser == true) break;
 
-                if (wallpaper.Rotate(now, image => renderer?.ChangeBackground(image))) dirty = true;
+                if (wallpaper.Rotate(now, image => renderer?.ChangeBackground(image)))
+                {
+                    dockPreviews.Invalidate();
+                    dirty = true;
+                }
 
                 var sample = playback?.Latest;
                 if (playback is not null)
@@ -126,6 +142,7 @@ internal static class DesktopScene
                             renderer = new D3D11Renderer(window.Handle, client.Width, client.Height, wallpaper.Background, TextAtlas.Size,
                                 target.Layer.Raised, wallpaper.Appearance.RenderScale);
                             text.Attach(renderer);
+                            dockPreviews.Invalidate();
                             host.Reveal(target);
                             report.Width = client.Width;
                             report.Height = client.Height;
@@ -231,6 +248,14 @@ internal static class DesktopScene
                         {
                             lastLayout = placement;
                             updateEditor?.Invoke(placement);
+                        }
+                        if (showDockPreviews && updateDockPreviews is not null)
+                        {
+                            int previousBlurBuilds = renderer.BlurBuilds;
+                            if (dockPreviews.Render(renderer, wallpaper.Style, text, localTime) is { } previews)
+                                updateDockPreviews(previews);
+                            report.BlurBuilds += renderer.BlurBuilds - previousBlurBuilds;
+                            wake = Math.Min(wake, dockPreviews.Next(now, localTime));
                         }
                     }
                     else if (layouts.Length != 0 && openFromWidget is { } open)
