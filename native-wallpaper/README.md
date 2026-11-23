@@ -11,24 +11,21 @@
 - **开机自启**可在设置窗口左下角或托盘菜单切换，两处状态同步。开启后，当前 Windows 用户登录时会启动程序。移到新目录后，在新位置打开程序并重新开启即可更新启动路径。
 - **歌词服务**可以切换播放器、调整优先级和采样间隔，选择和排序歌词源，以及配置超时、重试和缓存目录。停止编辑约 0.5 秒后，程序自动写入有效配置并合并重启采集，壁纸窗口继续运行。托盘的日志目录包含 `native-worker.log`。
 
-原生程序通过私有管道接收随包发布的 Python 采集进程的快照。它启动并监督采集，关闭时先让采集进程通过管道结束。采集复用网易云、Apple Music、歌词匹配和缓存，读取 `%LOCALAPPDATA%\LyricServer\config.json`。原生版的采集通过管道工作，不监听 HTTP 端口。
-
-每版首次运行时会在 `%LOCALAPPDATA%\LyricWallpaper\worker` 解包并缓存歌词采集组件，许可证和第三方声明也保存在该版本的缓存目录。
+播放器采集和歌词查询在同一个 .NET 进程的后台运行。支持网易云音乐、Microsoft Store 版 Apple Music，以及网易云、QQ 音乐和本地 LRC 歌词源。沿用 `%LOCALAPPDATA%\LyricServer\config.json` 和配置中的歌词缓存目录，能读取上一版下载的原词、译文和逐字歌词。
 
 ## 构建与开发
 
-在安装了 Python 3.14 和 .NET 10 SDK 的 Windows x64 机器上执行以下命令。脚本会打包 Python 采集进程，并生成包含两套运行时的 `release/LyricWallpaper-win-x64.exe`。
+在安装了 .NET 10 SDK 的 Windows x64 机器上执行以下命令，生成自包含的单文件 `release/LyricWallpaper-win-x64.exe`。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/build-native-wallpaper.ps1
 ```
 
-也可从源码启动，此时子进程使用当前 Python 环境。可以先退出正在运行的动态壁纸，避免两个程序同时向桌面呈现。
+也可从源码启动。可以先退出正在运行的动态壁纸，避免两个程序同时向桌面呈现。
 
 ```powershell
-python -m pip install -r server/requirements.txt
 dotnet build native-wallpaper/NativeWallpaper.csproj -c Release
-& .\native-wallpaper\bin\Release\net10.0-windows\NativeWallpaper.exe
+& .\native-wallpaper\bin\Release\net10.0-windows10.0.19041.0\NativeWallpaper.exe
 ```
 
 参数可组合使用。
@@ -40,8 +37,7 @@ dotnet build native-wallpaper/NativeWallpaper.csproj -c Release
 | `--demo` | 使用固定歌词和时间轴，默认 60 秒后退出。 |
 | `--test-scroll` | 启动时直接开启可切换的测试滚动，继续运行歌词采集。 |
 | `--still` | 使用演示歌词并固定在同一句，用于测量静止场景。 |
-| `--config 路径` | 使用指定的 Python 采集配置。 |
-| `--python 路径` | 从仓库运行时指定 Python 可执行文件。 |
+| `--config 路径` | 使用指定的歌词服务配置。 |
 | `--fps 100` | 设置动画帧率上限，默认 60。 |
 | `--wallpaper-config 路径` | 指定壁纸配置文件，也可为演示模式指定对比参数。 |
 | `--seconds 30` | 指定测试时长。 |

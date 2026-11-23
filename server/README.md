@@ -1,6 +1,6 @@
 # lyric-wallpaper server — 网易云音乐 / Apple Music Now Playing 服务
 
-为 [Windows 原生壁纸](../native-wallpaper/README.md) 采集网易云音乐或 Microsoft Store 版 Apple Music 的播放状态和歌词。原生程序启动 `server.worker` 或发布包内的 `LyricWorker.exe`，通过私有管道接收状态。独立 HTTP 模式仍可供 [Wallpaper Engine 旧版](https://github.com/ningjx/lyric-wallpaper/tree/codex/wallpaper-engine) 和其他兼容 [Now Playing API](https://github.com/Widdit/now-playing-service) 的客户端使用。
+此目录提供独立的 Python HTTP 歌词服务，供 [Wallpaper Engine 旧版](https://github.com/ningjx/lyric-wallpaper/tree/codex/wallpaper-engine) 和其他兼容 [Now Playing API](https://github.com/Widdit/now-playing-service) 的客户端使用。[Windows 原生壁纸](../native-wallpaper/README.md) 由进程内的 .NET 服务采集播放器状态和查询歌词，沿用相同的配置和歌词缓存格式。
 
 **核心价值**：原 now-playing-service 通过 UI Automation 读取播放进度，最小化/桌面歌词模式下经常读不到。本项目改用**进程内存读取**，精度毫秒级、任何窗口状态都可用。
 
@@ -63,7 +63,7 @@ python run.py                            # 便捷入口，等价于上面
 
 | 模块 | 作用 |
 |------|------|
-| `worker.py` | 原生采集入口，使用标准输入与输出和壁纸程序通信 |
+| `worker.py` | 早期原生版使用的标准输入与输出采集入口 |
 | `__main__.py` / `server.py` | 入口与生命周期：装配组件、启动 aiohttp、优雅关闭 |
 | `config.py` | dataclass 默认配置 + 可选 `config.json` 覆盖（命令行 > 配置文件 > 默认值） |
 | `core/` | 状态存储（单写者，工作线程投递 → 事件循环仲裁）、多源仲裁、/query 负载、指标 |

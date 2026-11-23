@@ -6,7 +6,7 @@ using Fluent = Wpf.Ui.Controls;
 internal sealed class DesktopTray : IDisposable
 {
     private readonly DesktopSettings storage;
-    private readonly LyricsWorker worker;
+    private readonly LyricsService worker;
     private readonly Func<WallpaperSettings> currentWallpaper;
     private readonly Action<WallpaperSettings> applyWallpaper;
     private readonly Func<bool> testEnabled;
@@ -27,7 +27,7 @@ internal sealed class DesktopTray : IDisposable
 
     public bool ExitRequested { get; private set; }
 
-    public DesktopTray(DesktopSettings storage, LyricsWorker worker, Func<WallpaperSettings> currentWallpaper,
+    public DesktopTray(DesktopSettings storage, LyricsService worker, Func<WallpaperSettings> currentWallpaper,
         Action<WallpaperSettings> applyWallpaper, Func<bool> testEnabled, Action<bool> setTestMode)
     {
         this.storage = storage;

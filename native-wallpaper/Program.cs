@@ -33,7 +33,7 @@ internal static class Program
                 throw new InvalidOperationException("歌词壁纸已在运行，可从系统托盘退出。");
             var wallpaperProfile = Value(args, "--wallpaper-config");
             var storage = new DesktopSettings(Value(args, "--config"), wallpaperProfile);
-            using var worker = demo ? null : new LyricsWorker(Value(args, "--python"), storage.ServicePath, storage.LogDirectory);
+            using var worker = demo ? null : new LyricsService(storage.ServicePath, storage.LogDirectory);
             var appearance = !demo || wallpaperProfile is not null ? storage.LoadWallpaper() : new WallpaperSettings();
             bool startTest = worker is not null && args.Contains("--test-scroll");
             Report Render(Action<RenderControls>? ready, Action<WorkerSample?>? updateStatus, CancellationToken stop) =>
@@ -55,7 +55,7 @@ internal static class Program
 
     private sealed record RenderControls(Dispatcher Dispatcher, Action<WallpaperSettings> ApplyAppearance, Action<bool> SetTestMode);
 
-    private static Report RunWithTray(DesktopSettings storage, LyricsWorker worker, WallpaperSettings appearance,
+    private static Report RunWithTray(DesktopSettings storage, LyricsService worker, WallpaperSettings appearance,
         bool testing, bool openSettings, Func<Action<RenderControls>, Action<WorkerSample?>, CancellationToken, Report> render)
     {
         var ui = Dispatcher.CurrentDispatcher;
@@ -127,7 +127,7 @@ internal static class Program
     }
 
     private static Report Run(double duration, int? fpsOverride, bool preview, bool still, string? capturePath, bool measure,
-        LyricsWorker? worker, WallpaperSettings appearance, bool startTest, Action<RenderControls>? ready,
+        LyricsService? worker, WallpaperSettings appearance, bool startTest, Action<RenderControls>? ready,
         Action<WorkerSample?>? updateStatus, CancellationToken stop)
     {
         Bitmap background;

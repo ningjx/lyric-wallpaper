@@ -1,18 +1,18 @@
 # 动态歌词壁纸
 
-一个 Windows 桌面歌词壁纸程序。它在主屏桌面图标后方用 D3D11 绘制滚动歌词、译文和液态玻璃效果，并通过随包的采集进程获取网易云音乐或 Microsoft Store 版 Apple Music 的播放状态与歌词。
+一个 Windows 桌面歌词壁纸程序。它在主屏桌面图标后方用 D3D11 绘制滚动歌词、译文和液态玻璃效果，并在同一进程内采集网易云音乐或 Microsoft Store 版 Apple Music 的播放状态，查询和缓存歌词。
 
 ## 开始使用
 
 1. [下载 Windows x64 单文件 EXE](https://github.com/ningjx/lyric-wallpaper/releases/latest/download/LyricWallpaper-win-x64.exe)，或在 [GitHub Releases](https://github.com/ningjx/lyric-wallpaper/releases) 查看版本记录。
-2. 直接运行 `LyricWallpaper-win-x64.exe`。程序会自动准备 .NET 和歌词采集所需的运行时。
+2. 直接运行 `LyricWallpaper-win-x64.exe`。发布包自带 .NET 运行时。
 3. 双击托盘图标，或右键选择「打开设置」。默认使用纯色背景，可以选择自己的图片。修改会实时应用并自动保存。
 
 设置窗口顶部的「测试滚动」可以播放演示歌词，左下角的「开机自启」与托盘菜单同步。程序读取 `%LOCALAPPDATA%\LyricServer\config.json`，壁纸设置保存在同目录的 `wallpaper.json`。
 
 ## 从源码构建
 
-在 Windows x64 上安装 Python 3.14 和 .NET 10 SDK，然后在仓库根目录运行以下命令。
+在 Windows x64 上安装 .NET 10 SDK，然后在仓库根目录运行以下命令。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/build-native-wallpaper.ps1
@@ -24,8 +24,8 @@ powershell -ExecutionPolicy Bypass -File scripts/build-native-wallpaper.ps1
 
 | 目录 | 用途 |
 | --- | --- |
-| [`native-wallpaper/`](native-wallpaper/) | D3D11 桌面渲染、WPF UI 设置和托盘、歌词采集进程管理 |
-| [`server/`](server/) | 播放状态采集、歌词匹配和缓存，原生程序通过私有管道接收数据 |
+| [`native-wallpaper/`](native-wallpaper/) | D3D11 桌面渲染、WPF 设置和托盘、进程内播放器采集与歌词服务 |
+| [`server/`](server/) | 旧版 Wallpaper Engine 使用的独立 Python HTTP 歌词服务 |
 | [`scripts/`](scripts/) | Windows 发布包与歌词采集构建脚本 |
 
 ## Wallpaper Engine 旧版
