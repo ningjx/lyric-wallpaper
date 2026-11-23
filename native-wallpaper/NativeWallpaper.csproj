@@ -12,10 +12,11 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="WPF-UI" Version="4.3.0" />
+    <InternalsVisibleTo Include="NativeWallpaper.Tests" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="System.IO" />
-    <EmbeddedResource Include="Glass.hlsl" LogicalName="Glass.hlsl" />
+    <EmbeddedResource Include="Rendering/Glass.hlsl" LogicalName="Glass.hlsl" />
     <EmbeddedResource Include="../LICENSE" LogicalName="LICENSE" />
     <EmbeddedResource Include="../THIRD_PARTY_NOTICES.md" LogicalName="THIRD_PARTY_NOTICES.md" />
   </ItemGroup>

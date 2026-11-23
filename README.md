@@ -8,7 +8,7 @@
 2. 直接运行 `LyricWallpaper-win-x64.exe`。发布包自带 .NET 运行时。
 3. 双击托盘图标，或右键选择「打开设置」。默认使用纯色背景，可以选择自己的图片。修改会实时应用并自动保存。
 
-设置窗口顶部的「测试滚动」可以播放演示歌词，左下角的「开机自启」与托盘菜单同步。程序读取 `%LOCALAPPDATA%\LyricServer\config.json`，壁纸设置保存在同目录的 `wallpaper.json`。
+设置窗口顶部的「测试滚动」可以播放演示歌词，左下角的「开机自启」与托盘菜单同步。长按桌面时钟或按 `Ctrl+Alt+E` 进入控件编辑，点右侧控件栏即可新增时钟。程序在 `%LOCALAPPDATA%\LyricServer` 中分别保存歌词服务、壁纸和控件配置。
 
 ## 从源码构建
 
@@ -24,7 +24,8 @@ powershell -ExecutionPolicy Bypass -File scripts/build-native-wallpaper.ps1
 
 | 目录 | 用途 |
 | --- | --- |
-| [`native-wallpaper/`](native-wallpaper/) | D3D11 桌面渲染、WPF 设置和托盘、进程内播放器采集与歌词服务 |
+| [`native-wallpaper/`](native-wallpaper/) | D3D11 壁纸、进程内歌词服务、桌面控件与 WPF 界面 |
+| [`native-wallpaper.Tests/`](native-wallpaper.Tests/) | 原生配置、控件及歌词服务回归检查 |
 | [`server/`](server/) | 旧版 Wallpaper Engine 使用的独立 Python HTTP 歌词服务 |
 | [`scripts/`](scripts/) | Windows 发布包与歌词采集构建脚本 |
 
