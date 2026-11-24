@@ -17,6 +17,7 @@
   <ItemGroup>
     <Using Include="System.IO" />
     <EmbeddedResource Include="Rendering/Glass.hlsl" LogicalName="Glass.hlsl" />
+    <EmbeddedResource Include="Rendering/SettingsGlass.hlsl" LogicalName="SettingsGlass.hlsl" />
     <EmbeddedResource Include="../LICENSE" LogicalName="LICENSE" />
     <EmbeddedResource Include="../THIRD_PARTY_NOTICES.md" LogicalName="THIRD_PARTY_NOTICES.md" />
   </ItemGroup>

@@ -16,14 +16,14 @@ namespace LyricWallpaper.Presentation;
 internal sealed class SettingsWindow : Fluent.FluentWindow
 {
     private const double ControlHeight = 32;
-    private static readonly (string Label, Fluent.SymbolRegular Icon)[] Categories =
+    private static readonly (string Label, string Icon)[] Categories =
     [
-        ("背景", Fluent.SymbolRegular.Image24),
-        ("歌词排版", Fluent.SymbolRegular.TextFont24),
-        ("空间层次", Fluent.SymbolRegular.Stack24),
-        ("玻璃", Fluent.SymbolRegular.Drop24),
-        ("高光与阴影", Fluent.SymbolRegular.WeatherSunny24),
-        ("歌词服务", Fluent.SymbolRegular.MusicNote224)
+        ("背景", "\uEB9F"),
+        ("歌词排版", "\uE8D2"),
+        ("空间层次", "\uECA5"),
+        ("玻璃", "\uE790"),
+        ("高光与阴影", "\uE706"),
+        ("歌词服务", "\uE8D6")
     ];
     private readonly Media.Brush ink, muted, line, surface, error;
     private readonly WallpaperStore wallpaperStore;
@@ -31,21 +31,20 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
     private readonly Action<WallpaperSettings> applyWallpaper;
     private readonly Action restartWorker;
     private readonly Dictionary<int, W.FrameworkElement> pages = new();
-    private readonly Ui.ListBox nav = new();
-    private readonly Ui.Grid page = new();
+    private readonly NativeGlassSelector nav = new(navigation: true);
+    private readonly NativeGlassScene glassScene;
+    private readonly Ui.Grid page = new() { Margin = new W.Thickness(0, 0, 12, 0) };
+    private readonly Ui.ScrollViewer pageScroll = new()
+    {
+        VerticalScrollBarVisibility = Ui.ScrollBarVisibility.Auto,
+        HorizontalScrollBarVisibility = Ui.ScrollBarVisibility.Disabled,
+        PanningMode = Ui.PanningMode.VerticalOnly
+    };
     private readonly Ui.TextBlock title = new();
     private readonly Ui.TextBlock status = new();
     private readonly Ui.TextBlock errorNotice = new() { Visibility = W.Visibility.Collapsed };
-    private readonly Fluent.ToggleSwitch testToggle = new()
-    {
-        Content = "测试滚动",
-        VerticalContentAlignment = W.VerticalAlignment.Center
-    };
-    private readonly Fluent.ToggleSwitch startupToggle = new()
-    {
-        Content = "开机自启", IsEnabled = false, MinHeight = ControlHeight,
-        VerticalContentAlignment = W.VerticalAlignment.Center
-    };
+    private readonly NativeGlassSwitch testToggle = new() { Content = "测试滚动" };
+    private readonly NativeGlassSwitch startupToggle = new() { Content = "开机自启", IsEnabled = false };
     private readonly W.Threading.DispatcherTimer wallpaperUpdate = new() { Interval = TimeSpan.FromMilliseconds(25) };
     private readonly W.Threading.DispatcherTimer wallpaperSave = new() { Interval = TimeSpan.FromMilliseconds(350) };
     private readonly W.Threading.DispatcherTimer serviceUpdate = new() { Interval = TimeSpan.FromMilliseconds(500) };
@@ -66,6 +65,11 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         this.applyWallpaper = applyWallpaper;
         this.restartWorker = restartWorker;
         SettingsTheme.Apply(this);
+        Resources.MergedDictionaries.Add(new W.ResourceDictionary
+        {
+            Source = new Uri("/NativeWallpaper;component/Presentation/NativeGlassInput.xaml", UriKind.Relative)
+        });
+        testToggle.Style = startupToggle.Style = (W.Style)FindResource("NativeSwitch");
         ink = ThemeBrush("TextFillColorPrimaryBrush");
         muted = ThemeBrush("TextFillColorSecondaryBrush");
         line = ThemeBrush("CardStrokeColorDefaultBrush");
@@ -75,12 +79,19 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         FontSize = SettingsTheme.FontSize;
         Title = "歌词壁纸 · 设置";
         Width = 780;
-        Height = 600;
+        Height = 650;
         MinWidth = 670;
-        MinHeight = 490;
+        MinHeight = 530;
         ExtendsContentIntoTitleBar = true;
-        WindowBackdropType = Fluent.WindowBackdropType.Mica;
-        SetResourceReference(BackgroundProperty, "ApplicationBackgroundBrush");
+        WindowBackdropType = W.SystemParameters.HighContrast ? Fluent.WindowBackdropType.None
+            : OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621) ? Fluent.WindowBackdropType.Acrylic
+            : OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000) ? Fluent.WindowBackdropType.Mica
+            : Fluent.WindowBackdropType.None;
+        if (WindowBackdropType == Fluent.WindowBackdropType.None)
+            SetResourceReference(BackgroundProperty, "ApplicationBackgroundBrush");
+        else
+            Background = Media.Brushes.Transparent;
+        UseLayoutRounding = true;
         Foreground = ink;
         WindowStartupLocation = W.WindowStartupLocation.CenterScreen;
         wallpaperUpdate.Tick += (_, _) => ApplyQueuedWallpaper();
@@ -103,10 +114,22 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
             SaveWallpaper();
             ApplyService();
         };
-        Closed += (_, _) => IsClosed = true;
-        Content = MakeLayout();
+        var foreground = MakeLayout();
+        var image = new Ui.Image { Stretch = Media.Stretch.Fill, IsHitTestVisible = false };
+        var canvas = new Ui.Grid { ClipToBounds = true };
+        canvas.Children.Add(image);
+        canvas.Children.Add(foreground);
+        Content = canvas;
+        glassScene = new(this, foreground, image);
+        Closed += (_, _) =>
+        {
+            IsClosed = true;
+            glassScene.Dispose();
+        };
         nav.SelectedIndex = 0;
     }
+
+    internal void InvalidateGlass() => glassScene?.Invalidate();
 
     public void SetStatus(string text) => status.Text = text;
     public void SetTestMode(bool enabled) => testToggle.IsChecked = enabled;
@@ -136,73 +159,53 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
 
     private W.FrameworkElement MakeLayout()
     {
-        var root = new Ui.DockPanel();
+        var root = new Ui.DockPanel { Background = Media.Brushes.Transparent };
         status.Foreground = muted;
         status.VerticalAlignment = W.VerticalAlignment.Center;
         status.Margin = new W.Thickness(12, 0, 0, 0);
-        var actions = new Ui.StackPanel { Orientation = Ui.Orientation.Horizontal,
-            Margin = new W.Thickness(0, 0, 14, 0), VerticalAlignment = W.VerticalAlignment.Center };
         status.MaxWidth = 210;
         status.TextTrimming = W.TextTrimming.CharacterEllipsis;
-        actions.Children.Add(testToggle);
-        actions.Children.Add(status);
-        var header = new Fluent.TitleBar { Title = Title, TrailingContent = actions, Height = 38 };
+        var header = new Fluent.TitleBar { Title = Title, TrailingContent = status, Height = 38 };
         Ui.DockPanel.SetDock(header, Ui.Dock.Top);
         root.Children.Add(header);
 
-        errorNotice.Foreground = error;
-        errorNotice.TextWrapping = W.TextWrapping.Wrap;
-        errorNotice.Margin = new W.Thickness(19, 2, 19, 9);
-        Ui.DockPanel.SetDock(errorNotice, Ui.Dock.Bottom);
-        root.Children.Add(errorNotice);
-
-        var body = new Ui.Grid { Margin = new W.Thickness(15, 0, 15, 12) };
-        body.ColumnDefinitions.Add(new Ui.ColumnDefinition { Width = new W.GridLength(132) });
-        body.ColumnDefinitions.Add(new Ui.ColumnDefinition());
+        nav.Style = (W.Style)FindResource("NativeNavigation");
+        nav.Width = 138;
+        nav.Height = Categories.Length * 44 + 2 * NativeGlassSelector.Inset;
+        nav.Margin = new W.Thickness(18, 12, 0, 0);
+        nav.VerticalAlignment = W.VerticalAlignment.Top;
+        var tabItemStyle = (W.Style)FindResource("NativeChoiceItem");
         foreach (var (label, icon) in Categories)
         {
-            var row = new Ui.StackPanel { Orientation = Ui.Orientation.Horizontal };
-            row.Children.Add(new Fluent.SymbolIcon { Symbol = icon, FontSize = 16, Margin = new W.Thickness(0, 0, 9, 0) });
-            row.Children.Add(new Ui.TextBlock { Text = label, VerticalAlignment = W.VerticalAlignment.Center });
-            var item = SettingsListItem(row);
+            var item = new Ui.ListBoxItem { Content = label, Style = tabItemStyle, Tag = icon };
             W.Automation.AutomationProperties.SetName(item, label);
             nav.Items.Add(item);
         }
         W.Automation.AutomationProperties.SetName(nav, "设置分类");
-        nav.Background = Media.Brushes.Transparent;
-        nav.Padding = new W.Thickness(4);
-        nav.BorderThickness = new W.Thickness(0);
-        nav.Margin = new W.Thickness(0, 0, 10, 0);
-        nav.SelectionChanged += (_, _) => SwitchCategory(nav.IsMouseOver && !nav.IsStylusOver &&
-            Input.Mouse.LeftButton == Input.MouseButtonState.Pressed);
-        var sidebar = new Ui.DockPanel();
-        startupToggle.Margin = new W.Thickness(7, 0, 0, 2);
-        Ui.DockPanel.SetDock(startupToggle, Ui.Dock.Bottom);
-        sidebar.Children.Add(startupToggle);
-        sidebar.Children.Add(nav);
-        body.Children.Add(sidebar);
+        nav.SelectionChanged += (_, _) => SwitchCategory();
+        Ui.DockPanel.SetDock(nav, Ui.Dock.Left);
+        root.Children.Add(nav);
 
-        var section = new Ui.DockPanel { Margin = new W.Thickness(16, 10, 12, 3) };
-        title.FontSize = 17;
+        var section = new Ui.DockPanel { Margin = new W.Thickness(23, 10, 23, 15) };
+        errorNotice.Foreground = error;
+        errorNotice.TextWrapping = W.TextWrapping.Wrap;
+        errorNotice.Margin = new W.Thickness(0, 6, 0, 0);
+        Ui.DockPanel.SetDock(errorNotice, Ui.Dock.Bottom);
+        section.Children.Add(errorNotice);
+
+        title.FontSize = 24;
         title.Foreground = ink;
         title.FontWeight = W.FontWeights.SemiBold;
-        title.Margin = new W.Thickness(0, 0, 0, 8);
+        title.Margin = new W.Thickness(0, 0, 0, 10);
         Ui.DockPanel.SetDock(title, Ui.Dock.Top);
         section.Children.Add(title);
-        section.Children.Add(new Ui.ScrollViewer
-        {
-            Content = page, VerticalScrollBarVisibility = Ui.ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = Ui.ScrollBarVisibility.Disabled
-        });
-        var card = new Ui.Border { BorderBrush = line, BorderThickness = new W.Thickness(1),
-            Background = surface, CornerRadius = new W.CornerRadius(8), Child = section };
-        Ui.Grid.SetColumn(card, 1);
-        body.Children.Add(card);
-        root.Children.Add(body);
+        pageScroll.Content = page;
+        section.Children.Add(pageScroll);
+        root.Children.Add(section);
         return root;
     }
 
-    private void SwitchCategory(bool pointerSelection)
+    private void SwitchCategory()
     {
         int index = nav.SelectedIndex;
         if (index < 0) return;
@@ -224,15 +227,14 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         // Keep inactive controls in the visual tree so their theme resources stay available.
         if (changingPage && visiblePage is { } previous)
         {
-            previous.BeginAnimation(OpacityProperty, null);
             previous.Visibility = W.Visibility.Collapsed;
+            pageScroll.ScrollToTop();
         }
         view.Visibility = W.Visibility.Visible;
-        if (changingPage && pointerSelection && W.SystemParameters.ClientAreaAnimation)
-            AnimateOpacity(view, .84, 1, 130);
         visiblePage = view;
         title.Text = Categories[index].Label;
         errorNotice.Visibility = W.Visibility.Collapsed;
+        InvalidateGlass();
     }
 
     private Ui.ListBoxItem SettingsListItem(W.FrameworkElement content)
@@ -503,6 +505,8 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
     private W.FrameworkElement MakeService()
     {
         var grid = Fields();
+        AddField(grid, "", testToggle);
+        AddField(grid, "", startupToggle);
         JsonObject loaded;
         try { loaded = playbackStore.Load(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
@@ -531,8 +535,12 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
             check.Unchecked += (_, _) => QueueService();
         }
         priority.SelectionChanged += (_, _) => QueueService();
-        AddField(grid, "播放器", Inline(netease, apple));
-        AddField(grid, priorityLabel, priority);
+        var players = new Ui.Primitives.UniformGrid { Columns = 2 };
+        netease.Margin = apple.Margin = new W.Thickness(0, 0, 13, 0);
+        players.Children.Add(netease);
+        players.Children.Add(apple);
+        AddField(grid, "播放器", players, full: true);
+        AddField(grid, priorityLabel, priority, full: true);
         var readNetease = ServiceNumber(grid, "网易云采样（秒）", music, "netease_poll_interval", .2, .05, 5, .05);
         var readApple = ServiceNumber(grid, "Apple Music 采样（秒）", music, "apple_poll_interval", .2, .05, 5, .05);
         var expiry = ServiceNumber(grid, "采集失联判定（秒）", music, "snapshot_max_age", 2, .2, 60, .1);
@@ -540,8 +548,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         var request = ServiceNumber(grid, "单次网络超时（秒）", network, "timeout", 5, 1, 60, .5);
         var retries = ServiceNumber(grid, "网络重试次数", network, "retries", 3, 0, 10, 1);
 
-        var list = new Ui.ListBox { MinHeight = 95, MaxHeight = 150, Padding = new W.Thickness(4) };
-        list.SetResourceReference(Ui.ListBox.BackgroundProperty, "ControlFillColorDefaultBrush");
+        var list = new Ui.ListBox { MinHeight = 95, MaxHeight = 150, Padding = new W.Thickness(4), Background = Media.Brushes.Transparent };
         list.BorderBrush = line;
         list.BorderThickness = new W.Thickness(1);
         var known = new Dictionary<string, string> { ["local-file"] = "本地歌词", ["netease"] = "网易云音乐", ["qq"] = "QQ 音乐" };
@@ -560,7 +567,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         {
             int index = list.SelectedIndex, destination = index + delta;
             if (index < 0 || destination < 0 || destination >= providerKeys.Length) return;
-            // Move the data while keeping both WPF UI check boxes in the theme's resource scope.
+            // Move the data while keeping both switches in the theme's resource scope.
             (providerKeys[index], providerKeys[destination]) = (providerKeys[destination], providerKeys[index]);
             var source = providerChecks[index];
             var target = providerChecks[destination];
@@ -643,14 +650,10 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         };
     }
 
-    private Fluent.ToggleSwitch Boolean(Ui.Grid grid, string label, bool initial, Func<WallpaperSettings, bool, WallpaperSettings> setter,
+    private NativeGlassSwitch Boolean(Ui.Grid grid, string label, bool initial, Func<WallpaperSettings, bool, WallpaperSettings> setter,
         string? hint = null)
     {
-        var check = new Fluent.ToggleSwitch
-        {
-            Content = label, IsChecked = initial,
-            MinHeight = ControlHeight, VerticalContentAlignment = W.VerticalAlignment.Center
-        };
+        var check = Check(label, initial);
         W.Automation.AutomationProperties.SetName(check, label);
         check.ToolTip = hint;
         check.Checked += (_, _) => QueueWallpaper(s => setter(s, true));
@@ -709,8 +712,8 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         out W.FrameworkElement field, Action<double?> changed)
     {
         initial = Math.Clamp(initial, min, max);
-        var slider = new Ui.Slider { Minimum = min, Maximum = max, Value = initial, TickFrequency = step,
-            Style = (W.Style)FindResource("SettingsSliderStyle"),
+        var slider = new NativeGlassSlider { Minimum = min, Maximum = max, Value = initial, TickFrequency = step,
+            Style = (W.Style)FindResource("NativeSlider"),
             SmallChange = step, LargeChange = step * 5, IsSnapToTickEnabled = true,
             VerticalAlignment = W.VerticalAlignment.Center, Margin = new W.Thickness(0, 0, 9, 0) };
         var input = new Fluent.TextBox { Width = 74, MinHeight = ControlHeight, FontFamily = new Media.FontFamily("Cascadia Mono, Consolas"), Text = initial.ToString(CultureInfo.InvariantCulture),
@@ -755,35 +758,25 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
 
     private Ui.ListBox Choice(string label, string[] options, int index)
     {
-        var choice = new Ui.ListBox
+        var choice = new NativeGlassSelector(navigation: false)
         {
-            Style = (W.Style)FindResource("SettingsSegmentedChoiceStyle"),
+            Style = (W.Style)FindResource("NativeChoice"),
             ItemsSource = options,
             SelectedIndex = index
         };
         W.Automation.AutomationProperties.SetName(choice, label);
-        choice.PreviewKeyDown += (_, e) =>
-        {
-            int offset = e.Key switch { Input.Key.Left => -1, Input.Key.Right => 1, _ => 0 };
-            if (offset == 0 || e.KeyboardDevice.Modifiers != Input.ModifierKeys.None) return;
-            int next = choice.SelectedIndex + offset;
-            if (next >= 0 && next < choice.Items.Count)
-            {
-                choice.SelectedIndex = next;
-                if (choice.ItemContainerGenerator.ContainerFromIndex(next) is Ui.ListBoxItem item)
-                    item.Focus();
-            }
-            e.Handled = true;
-        };
         return choice;
     }
 
-    private static Ui.CheckBox Check(string label, bool value) =>
-        new() { Content = label, IsChecked = value, MinHeight = ControlHeight, VerticalContentAlignment = W.VerticalAlignment.Center };
+    private NativeGlassSwitch Check(string label, bool value) =>
+        new() { Content = label, IsChecked = value, Style = (W.Style)FindResource("NativeSwitch") };
 
     private Ui.Button Button(object content, Action action)
     {
-        var button = new Fluent.Button { Content = content, MinHeight = ControlHeight, MinWidth = 52 };
+        var button = new NativeGlassButton
+        {
+            Content = content, Style = (W.Style)FindResource("NativeAction"), MinHeight = ControlHeight, MinWidth = 52
+        };
         button.Click += (_, _) => TryAction(action);
         return button;
     }

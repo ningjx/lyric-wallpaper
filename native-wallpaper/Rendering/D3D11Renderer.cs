@@ -8,7 +8,7 @@ using LyricWallpaper.Scene;
 
 namespace LyricWallpaper.Rendering;
 
-internal sealed unsafe class D3D11Renderer : IDisposable
+internal sealed unsafe partial class D3D11Renderer : IDisposable
 {
     private enum Device { CreateBuffer = 3, CreateTexture2D = 5, CreateShaderResourceView = 7,
         CreateRenderTargetView = 9, CreateVertexShader = 12, CreatePixelShader = 15, CreateBlendState = 20, CreateSamplerState = 23 }
@@ -16,7 +16,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         PSSetSamplers = 10, VSSetShader = 11, Draw = 13, Map = 14, Unmap = 15, PSSetConstantBuffers = 16, DrawInstanced = 21,
         VSSetShaderResources = 25, VSSetSamplers = 26,
         IASetPrimitiveTopology = 24, OMSetRenderTargets = 33, OMSetBlendState = 35, RSSetViewports = 44,
-        CopyResource = 47, UpdateSubresource = 48, GenerateMips = 54, Flush = 111 }
+        CopyResource = 47, UpdateSubresource = 48, ClearRenderTarget = 50, GenerateMips = 54, Flush = 111 }
     private enum SwapChain { Present = 8, GetBuffer = 9, ResizeBuffers = 13 }
     private const uint Bgra8 = 87, R8Unorm = 61;
     private const int PreviewWidth = 384, PreviewHeight = 216;
@@ -93,24 +93,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
 
             constants = CreateConstantBuffer(SceneVectors);
             blurConstants = CreateConstantBuffer(GaussianBlurKernel.VectorCount);
-            nint resource;
-            var blend = new BlendDescription();
-            blend.Targets[0] = new RenderTargetBlend
-            {
-                Enabled = 1, Source = 2, Destination = 6, Operation = 1,
-                SourceAlpha = 2, DestinationAlpha = 6, AlphaOperation = 1, WriteMask = 15
-            };
-            Check(((delegate* unmanaged[Stdcall]<nint, BlendDescription*, nint*, int>)Slot(device, (int)Device.CreateBlendState))
-                (device, &blend, &resource), "create widget blend state");
-            widgetBlend = resource;
-            var sampling = new SamplerDescription
-            {
-                Filter = 0x15, AddressU = 3, AddressV = 3, AddressW = 3, MaxAnisotropy = 1,
-                Comparison = 1, MaxLod = float.MaxValue
-            };
-            Check(((delegate* unmanaged[Stdcall]<nint, SamplerDescription*, nint*, int>)Slot(device, (int)Device.CreateSamplerState))
-                (device, &sampling, &resource), "create sampler");
-            sampler = resource;
+            CreateSharedStates();
             background = CreateTexture(backgroundBitmap);
             var atlasDescription = new TextureDescription
             {
@@ -128,13 +111,35 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         }
     }
 
-    private static byte[] ReadShaderSource()
+    private static byte[] ReadShaderSource(string resource = "Glass.hlsl")
     {
-        using var shader = typeof(D3D11Renderer).Assembly.GetManifestResourceStream("Glass.hlsl")
-            ?? throw new InvalidOperationException("找不到内置玻璃着色器。");
+        using var shader = typeof(D3D11Renderer).Assembly.GetManifestResourceStream(resource)
+            ?? throw new InvalidOperationException($"找不到内置玻璃着色器 {resource}。");
         var source = new byte[shader.Length];
         shader.ReadExactly(source);
         return source;
+    }
+
+    private void CreateSharedStates()
+    {
+        nint resource;
+        var blend = new BlendDescription();
+        blend.Targets[0] = new RenderTargetBlend
+        {
+            Enabled = 1, Source = 2, Destination = 6, Operation = 1,
+            SourceAlpha = 2, DestinationAlpha = 6, AlphaOperation = 1, WriteMask = 15
+        };
+        Check(((delegate* unmanaged[Stdcall]<nint, BlendDescription*, nint*, int>)Slot(device, (int)Device.CreateBlendState))
+            (device, &blend, &resource), "create premultiplied blend state");
+        widgetBlend = resource;
+        var sampling = new SamplerDescription
+        {
+            Filter = 0x15, AddressU = 3, AddressV = 3, AddressW = 3, MaxAnisotropy = 1,
+            Comparison = 1, MaxLod = float.MaxValue
+        };
+        Check(((delegate* unmanaged[Stdcall]<nint, SamplerDescription*, nint*, int>)Slot(device, (int)Device.CreateSamplerState))
+            (device, &sampling, &resource), "create sampler");
+        sampler = resource;
     }
 
     private nint CreateConstantBuffer(int vectors)
