@@ -368,8 +368,10 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         });
         AddSourceAction("纯色背景", Fluent.SymbolRegular.PaintBucket20, () => SelectSource("", ""));
         AddField(grid, "背景来源", Inline(source, select), full: true);
-        Option(grid, "布局", ["裁切填充", "完整显示", "拉伸", "平铺"], (int)wallpaper.Layout,
-            (s, v) => s with { Layout = (BackgroundLayout)v });
+        Option(grid, "布局",
+            [("裁切填充", BackgroundLayout.Cover), ("完整显示", BackgroundLayout.Contain),
+             ("拉伸", BackgroundLayout.Stretch), ("平铺", BackgroundLayout.Tile)],
+            wallpaper.Layout, (s, v) => s with { Layout = v }, full: true);
         Integer(grid, "轮播间隔（秒）", wallpaper.RotationSeconds, 10, 3600, (s, v) => s with { RotationSeconds = v }, 10);
         Integer(grid, "背景缩放（%）", wallpaper.BackgroundZoom, 10, 400, (s, v) => s with { BackgroundZoom = v }, 5);
         Integer(grid, "背景水平位置（%）", wallpaper.BackgroundX, -100, 100, (s, v) => s with { BackgroundX = v });
@@ -391,15 +393,17 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
             SetPath(font, family, "");
             QueueWallpaper(s => s with { FontFamily = family });
         })));
-        ColorField(grid, "文字颜色", wallpaper.TextColor, (s, v) => s with { TextColor = v });
+        ColorField(grid, "文字颜色", wallpaper.TextColor, wallpaper.Opacity / 100d,
+            (s, color, opacity) => s with { TextColor = color, Opacity = (int)Math.Round(opacity * 100) },
+            minimum: .2, wholePercent: true);
         Boolean(grid, "自适应文字对比度", wallpaper.AdaptiveContrast, (s, v) => s with { AdaptiveContrast = v },
             "背景与文字过于接近时，自动加浅色或深色细描边，保留所选文字颜色。");
         Integer(grid, "字号（%）", wallpaper.FontScale, 50, 160, (s, v) => s with { FontScale = v });
-        Integer(grid, "文字不透明度（%）", wallpaper.Opacity, 20, 100, (s, v) => s with { Opacity = v });
         Integer(grid, "行距（%）", wallpaper.Spacing, 35, 175, (s, v) => s with { Spacing = v });
         Integer(grid, "背板内边距", wallpaper.Padding, 0, 160, (s, v) => s with { Padding = v });
-        Option(grid, "屏幕对齐", ["居中", "靠左", "靠右"], (int)wallpaper.Alignment,
-            (s, v) => s with { Alignment = (LyricAlignment)v });
+        Option(grid, "屏幕对齐",
+            [("靠左", LyricAlignment.Left), ("居中", LyricAlignment.Center), ("靠右", LyricAlignment.Right)],
+            wallpaper.Alignment, (s, v) => s with { Alignment = v });
         Integer(grid, "歌词垂直微调", wallpaper.TextY, -40, 40, (s, v) => s with { TextY = v });
         Integer(grid, "整体水平（%）", wallpaper.Horizontal, -52, 52, (s, v) => s with { Horizontal = v });
         Integer(grid, "整体垂直（%）", wallpaper.Vertical, -56, 56, (s, v) => s with { Vertical = v });
@@ -445,14 +449,14 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         Decimal(grid, "饱和度", wallpaper.Saturation, 0, 2.5, .01, (s, v) => s with { Saturation = v });
         Decimal(grid, "亮度", wallpaper.Brightness, -.5, .5, .01, (s, v) => s with { Brightness = v });
         Decimal(grid, "对比度", wallpaper.Contrast, .3, 2, .01, (s, v) => s with { Contrast = v });
-        ColorField(grid, "染色", wallpaper.TintColor, (s, v) => s with { TintColor = v });
-        Decimal(grid, "染色不透明度", wallpaper.TintAlpha, 0, .6, .01, (s, v) => s with { TintAlpha = v });
+        ColorField(grid, "染色", wallpaper.TintColor, wallpaper.TintAlpha,
+            (s, color, opacity) => s with { TintColor = color, TintAlpha = opacity }, maximum: .6);
         Boolean(grid, "色相染色", wallpaper.HueTint, (s, v) => s with { HueTint = v },
             "先替换背景色相，再薄叠染色，保留更多背景明暗细节。");
-        ColorField(grid, "表面色", wallpaper.SurfaceColor, (s, v) => s with { SurfaceColor = v });
-        Decimal(grid, "表面不透明度", wallpaper.SurfaceAlpha, 0, .6, .01, (s, v) => s with { SurfaceAlpha = v });
-        Option(grid, "色散", ["关闭", "RGB 色差", "七路光谱"], (int)wallpaper.Dispersion,
-            (s, v) => s with { Chromatic = v == (int)ChromaticMode.Rgb, SpectralDispersion = v == (int)ChromaticMode.Spectral });
+        ColorField(grid, "表面色", wallpaper.SurfaceColor, wallpaper.SurfaceAlpha,
+            (s, color, opacity) => s with { SurfaceColor = color, SurfaceAlpha = opacity }, maximum: .6);
+        Option(grid, "色散", [("关闭", ChromaticMode.Off), ("RGB 色差", ChromaticMode.Rgb), ("七路光谱", ChromaticMode.Spectral)],
+            wallpaper.Dispersion, (s, v) => s with { Chromatic = v == ChromaticMode.Rgb, SpectralDispersion = v == ChromaticMode.Spectral });
         Boolean(grid, "歌词置于玻璃背面", wallpaper.BehindGlass, (s, v) => s with { BehindGlass = v });
         return grid;
     }
@@ -464,16 +468,18 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         var followWallpaper = Boolean(grid, "控件高光跟随壁纸", wallpaper.WidgetWallpaperHighlight,
             (s, v) => s with { WidgetWallpaperHighlight = v },
             "从壁纸可见区域识别最多四个明显亮区，各控件按光源方向、颜色和距离混合高光。没有明显亮区时沿用手动值。");
-        Option(grid, "高光模式", ["默认", "环境", "纯净"], (int)wallpaper.HighlightMode,
-            (s, v) => s with { HighlightMode = (HighlightStyle)v });
-        var highlightColor = ColorField(grid, "高光颜色", wallpaper.HighlightColor, (s, v) => s with { HighlightColor = v });
-        Decimal(grid, "高光强度", wallpaper.HighlightAlpha, 0, 1, .01, (s, v) => s with { HighlightAlpha = v });
+        Option(grid, "高光模式",
+            [("默认", HighlightStyle.Directional), ("环境", HighlightStyle.Ambient), ("纯净", HighlightStyle.Even)],
+            wallpaper.HighlightMode, (s, v) => s with { HighlightMode = v });
+        ColorField(grid, "高光颜色", wallpaper.HighlightColor, wallpaper.HighlightAlpha,
+            (s, color, opacity) => s with { HighlightColor = color, HighlightAlpha = opacity },
+            canEditColor: () => followWallpaper.IsChecked != true);
         var highlightAngle = Decimal(grid, "高光角度", wallpaper.HighlightAngle, -3.14, 3.14, .01, (s, v) => s with { HighlightAngle = v });
         void UpdateManualHighlight()
         {
             bool enabled = followWallpaper.IsChecked != true;
-            highlightAngle.IsEnabled = highlightColor.IsEnabled = enabled;
-            highlightAngle.Opacity = highlightColor.Opacity = enabled ? 1 : .5;
+            highlightAngle.IsEnabled = enabled;
+            highlightAngle.Opacity = enabled ? 1 : .5;
         }
         followWallpaper.Checked += (_, _) => UpdateManualHighlight();
         followWallpaper.Unchecked += (_, _) => UpdateManualHighlight();
@@ -481,8 +487,8 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         Decimal(grid, "高光衰减", wallpaper.HighlightFalloff, .2, 5, .01, (s, v) => s with { HighlightFalloff = v });
         Decimal(grid, "高光边缘宽度", wallpaper.HighlightWidth, .2, 6, .1, (s, v) => s with { HighlightWidth = v });
         Boolean(grid, "启用外阴影", wallpaper.Shadow, (s, v) => s with { Shadow = v });
-        ColorField(grid, "阴影颜色", wallpaper.ShadowColor, (s, v) => s with { ShadowColor = v });
-        Decimal(grid, "阴影不透明度", wallpaper.ShadowAlpha, 0, 1, .01, (s, v) => s with { ShadowAlpha = v });
+        ColorField(grid, "阴影颜色", wallpaper.ShadowColor, wallpaper.ShadowAlpha,
+            (s, color, opacity) => s with { ShadowColor = color, ShadowAlpha = opacity });
         Integer(grid, "阴影模糊半径", wallpaper.ShadowRadius, 0, 80, (s, v) => s with { ShadowRadius = v });
         Integer(grid, "阴影水平偏移", wallpaper.ShadowX, -50, 50, (s, v) => s with { ShadowX = v });
         Integer(grid, "阴影垂直偏移", wallpaper.ShadowY, -50, 80, (s, v) => s with { ShadowY = v });
@@ -511,7 +517,8 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         var network = loaded["netease"] as JsonObject;
         var netease = Check("网易云音乐", PlaybackSettingsStore.Read(music, "enable_netease", true));
         var apple = Check("Apple Music", PlaybackSettingsStore.Read(music, "enable_apple", true));
-        var priority = Choice(["Apple Music 优先", "网易云音乐优先"],
+        const string priorityLabel = "播放器优先级";
+        var priority = Choice(priorityLabel, ["Apple Music 优先", "网易云音乐优先"],
             (loaded["source_priority"] as JsonArray)?.FirstOrDefault()?.ToString() == "netease" ? 1 : 0);
         var caching = new Fluent.TextBox { Text = PlaybackSettingsStore.Read(cache, "data_dir", ""), MinHeight = ControlHeight };
         caching.ToolTip = "留空时使用默认缓存目录";
@@ -525,7 +532,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         }
         priority.SelectionChanged += (_, _) => QueueService();
         AddField(grid, "播放器", Inline(netease, apple));
-        AddField(grid, "播放器优先级", priority);
+        AddField(grid, priorityLabel, priority);
         var readNetease = ServiceNumber(grid, "网易云采样（秒）", music, "netease_poll_interval", .2, .05, 5, .05);
         var readApple = ServiceNumber(grid, "Apple Music 采样（秒）", music, "apple_poll_interval", .2, .05, 5, .05);
         var expiry = ServiceNumber(grid, "采集失联判定（秒）", music, "snapshot_max_age", 2, .2, 60, .1);
@@ -622,14 +629,17 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         return field;
     }
 
-    private void Option(Ui.Grid grid, string label, string[] values, int selected,
-        Func<WallpaperSettings, int, WallpaperSettings> setter)
+    private void Option<T>(Ui.Grid grid, string label, (string Label, T Value)[] options, T selected,
+        Func<WallpaperSettings, T, WallpaperSettings> setter, bool full = false)
     {
-        var choice = Choice(values, selected);
-        AddField(grid, label, choice);
+        int index = Array.FindIndex(options, option => EqualityComparer<T>.Default.Equals(option.Value, selected));
+        var choice = Choice(label, options.Select(option => option.Label).ToArray(), index);
+        AddField(grid, label, choice, full);
         choice.SelectionChanged += (_, _) =>
         {
-            if (choice.SelectedIndex >= 0) QueueWallpaper(s => setter(s, choice.SelectedIndex));
+            if (choice.SelectedIndex < 0) return;
+            T value = options[choice.SelectedIndex].Value;
+            QueueWallpaper(s => setter(s, value));
         };
     }
 
@@ -649,30 +659,46 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         return check;
     }
 
-    private W.FrameworkElement ColorField(Ui.Grid grid, string label, int initial, Func<WallpaperSettings, int, WallpaperSettings> setter)
+    private void ColorField(Ui.Grid grid, string label, int color, double opacity,
+        Func<WallpaperSettings, int, double, WallpaperSettings> setter, double minimum = 0, double maximum = 1,
+        bool wholePercent = false, Func<bool>? canEditColor = null)
     {
-        int color = initial;
+        var preview = new Ui.Border { CornerRadius = new W.CornerRadius(4) };
         var swatch = new Ui.Border
         {
-            Width = 18, Height = 14, VerticalAlignment = W.VerticalAlignment.Center,
-            Margin = new W.Thickness(0, 0, 7, 0),
-            CornerRadius = new W.CornerRadius(4), BorderBrush = line, BorderThickness = new W.Thickness(1),
-            Background = ColorBrush(color)
+            Width = 24, Height = 18, VerticalAlignment = W.VerticalAlignment.Center,
+            Margin = new W.Thickness(0, 0, 8, 0), Child = preview,
+            CornerRadius = new W.CornerRadius(5), BorderBrush = line, BorderThickness = new W.Thickness(1)
         };
-        var face = new Ui.StackPanel { Orientation = Ui.Orientation.Horizontal };
-        face.Children.Add(swatch);
-        face.Children.Add(new Ui.TextBlock { Text = "选择…", VerticalAlignment = W.VerticalAlignment.Center });
-        var pickColor = Button(face, () =>
+        swatch.SetResourceReference(Ui.Border.BackgroundProperty, "ColorCheckerBrush");
+        var hex = new Ui.TextBlock { VerticalAlignment = W.VerticalAlignment.Center };
+        var percent = Text("", 12, muted);
+        var colorLabel = new Ui.DockPanel();
+        Ui.DockPanel.SetDock(swatch, Ui.Dock.Left);
+        colorLabel.Children.Add(swatch);
+        colorLabel.Children.Add(hex);
+        void Refresh()
         {
-            using var picker = new System.Windows.Forms.ColorDialog { Color = System.Drawing.Color.FromArgb(color), FullOpen = true };
-            if (picker.ShowDialog(new DialogOwner(new W.Interop.WindowInteropHelper(this).Handle)) != System.Windows.Forms.DialogResult.OK) return;
-            color = picker.Color.ToArgb();
-            swatch.Background = ColorBrush(color);
-            QueueWallpaper(s => setter(s, color));
+            preview.Background = new Media.SolidColorBrush(ColorPickerWindow.Rgb(color)) { Opacity = opacity };
+            hex.Text = ColorPickerWindow.FormatHex(color);
+            percent.Text = ColorPickerWindow.FormatOpacity(opacity);
+        }
+        Refresh();
+        var pickColor = Button(Inline(colorLabel, percent), () =>
+        {
+            var picker = new ColorPickerWindow(label, color, opacity, minimum, maximum, canEditColor?.Invoke() ?? true, wholePercent)
+            {
+                Owner = this
+            };
+            if (picker.ShowDialog() != true) return;
+            var selected = (Color: picker.SelectedArgb, Opacity: picker.SelectedOpacity);
+            (color, opacity) = selected;
+            Refresh();
+            QueueWallpaper(s => setter(s, selected.Color, selected.Opacity));
         });
-        pickColor.HorizontalAlignment = W.HorizontalAlignment.Left;
-        W.Automation.AutomationProperties.SetName(pickColor, "选择" + label);
-        return AddField(grid, label, pickColor);
+        pickColor.HorizontalContentAlignment = W.HorizontalAlignment.Stretch;
+        W.Automation.AutomationProperties.SetName(pickColor, "选择" + label + "和不透明度");
+        AddField(grid, label, pickColor);
     }
 
     private Func<double> Number(Ui.Grid grid, string label, double initial, double min, double max, double step,
@@ -727,9 +753,30 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         };
     }
 
-    private static Ui.ComboBox Choice(string[] options, int index) =>
-        new() { ItemsSource = options, SelectedIndex = index, HorizontalAlignment = W.HorizontalAlignment.Stretch,
-            MinHeight = ControlHeight, Padding = new W.Thickness(10, 5, 10, 5) };
+    private Ui.ListBox Choice(string label, string[] options, int index)
+    {
+        var choice = new Ui.ListBox
+        {
+            Style = (W.Style)FindResource("SettingsSegmentedChoiceStyle"),
+            ItemsSource = options,
+            SelectedIndex = index
+        };
+        W.Automation.AutomationProperties.SetName(choice, label);
+        choice.PreviewKeyDown += (_, e) =>
+        {
+            int offset = e.Key switch { Input.Key.Left => -1, Input.Key.Right => 1, _ => 0 };
+            if (offset == 0 || e.KeyboardDevice.Modifiers != Input.ModifierKeys.None) return;
+            int next = choice.SelectedIndex + offset;
+            if (next >= 0 && next < choice.Items.Count)
+            {
+                choice.SelectedIndex = next;
+                if (choice.ItemContainerGenerator.ContainerFromIndex(next) is Ui.ListBoxItem item)
+                    item.Focus();
+            }
+            e.Handled = true;
+        };
+        return choice;
+    }
 
     private static Ui.CheckBox Check(string label, bool value) =>
         new() { Content = label, IsChecked = value, MinHeight = ControlHeight, VerticalContentAlignment = W.VerticalAlignment.Center };
@@ -797,9 +844,6 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         new() { Text = value, FontSize = size, Foreground = color };
 
     private Media.Brush ThemeBrush(string key) => (Media.Brush)FindResource(key);
-
-    private static Media.Brush ColorBrush(int color) => new Media.SolidColorBrush(
-        Media.Color.FromArgb((byte)(color >> 24), (byte)(color >> 16), (byte)(color >> 8), (byte)color));
 
     private Ui.TextBlock PathLabel(string path, string empty)
     {
