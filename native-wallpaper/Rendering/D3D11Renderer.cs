@@ -15,19 +15,20 @@ internal sealed unsafe class D3D11Renderer : IDisposable
     private enum Context { VSSetConstantBuffers = 7, PSSetShaderResources = 8, PSSetShader = 9,
         PSSetSamplers = 10, VSSetShader = 11, Draw = 13, Map = 14, Unmap = 15, PSSetConstantBuffers = 16, DrawInstanced = 21,
         IASetPrimitiveTopology = 24, OMSetRenderTargets = 33, OMSetBlendState = 35, RSSetViewports = 44,
-        CopyResource = 47, UpdateSubresource = 48, Flush = 111 }
+        CopyResource = 47, UpdateSubresource = 48, GenerateMips = 54, Flush = 111 }
     private enum SwapChain { Present = 8, GetBuffer = 9, ResizeBuffers = 13 }
     private const uint Bgra8 = 87, R8Unorm = 61;
     private const int PreviewWidth = 384, PreviewHeight = 216;
     private static readonly Guid Texture2DId = new("6f15aaf2-d208-4e89-9ab4-489535d34f9c");
     private static readonly Guid DxgiDeviceId = new("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
     private static readonly Guid DxgiFactory2Id = new("50c83a1c-e072-4c48-87b0-3630fa36a6d0");
-    private nint device, context, chain, target, constants, sampler, background, lyrics, atlasTexture;
-    private nint backgroundVs, backgroundPs, cardVs, cardPs, blurHorizontalPs, blurVerticalPs;
+    private nint device, context, chain, target, constants, blurConstants, sampler, background, lyrics, atlasTexture;
+    private nint backgroundVs, backgroundPs, cardVs, cardPs, blurDownsamplePs, blurHorizontalPs, blurVerticalPs;
     private nint widgetPs, widgetBlend;
     private nint previewBackgroundPs, previewWidgetPs, previewTexture, previewTarget, previewStaging;
-    private (nint Target, nint Input) blurHorizontal, blurVertical;
-    private readonly record struct BlurKey(BackgroundLayout Layout, int Zoom, int X, int Y, int Radius);
+    private (nint Target, nint Input) blurHorizontal, blurResult;
+    private (Size Size, bool Mipmapped) blurSurface;
+    private readonly record struct BlurKey(BackgroundView View, int GaussianRadius);
     private BlurKey? cachedBlur;
     private int backgroundWidth, backgroundHeight;
     public const int SceneVectors = 62;
@@ -78,14 +79,13 @@ internal sealed unsafe class D3D11Renderer : IDisposable
             cardVs = CreateShader(source, "CardVertex", "vs_5_0", Device.CreateVertexShader);
             cardPs = CreateShader(source, "CardPixel", "ps_5_0", Device.CreatePixelShader);
             widgetPs = CreateShader(source, "WidgetPixel", "ps_5_0", Device.CreatePixelShader);
+            blurDownsamplePs = CreateShader(source, "BlurDownsample", "ps_5_0", Device.CreatePixelShader);
             blurHorizontalPs = CreateShader(source, "BlurHorizontal", "ps_5_0", Device.CreatePixelShader);
             blurVerticalPs = CreateShader(source, "BlurVertical", "ps_5_0", Device.CreatePixelShader);
 
-            var constantDescription = new BufferDescription { ByteWidth = SceneVectors * 16, BindFlags = 4 };
+            constants = CreateConstantBuffer(SceneVectors);
+            blurConstants = CreateConstantBuffer(GaussianBlurKernel.VectorCount);
             nint resource;
-            Check(((delegate* unmanaged[Stdcall]<nint, BufferDescription*, nint, nint*, int>)Slot(device, (int)Device.CreateBuffer))
-                (device, &constantDescription, 0, &resource), "create constant buffer");
-            constants = resource;
             var blend = new BlendDescription();
             blend.Targets[0] = new RenderTargetBlend
             {
@@ -127,6 +127,15 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         var source = new byte[shader.Length];
         shader.ReadExactly(source);
         return source;
+    }
+
+    private nint CreateConstantBuffer(int vectors)
+    {
+        var description = new BufferDescription { ByteWidth = (uint)(vectors * 16), BindFlags = 4 };
+        nint buffer;
+        Check(((delegate* unmanaged[Stdcall]<nint, BufferDescription*, nint, nint*, int>)Slot(device, (int)Device.CreateBuffer))
+            (device, &description, 0, &buffer), "create constant buffer");
+        return buffer;
     }
 
     private (int Width, int Height) ScaledSize(double scale)
@@ -182,7 +191,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         // Flip-model Present unbinds the back buffer, so bind it again each frame.
         SetTarget(target);
         SetViewport(Width, Height);
-        if (sampleBlur) SetBlurInput(blurVertical.Input);
+        if (sampleBlur) SetBlurInput(blurResult.Input);
         DrawBackground(backgroundPs);
         if (frame.Lyrics.Count != 0) DrawCards(cardPs, (uint)frame.Lyrics.Count);
         if (frame.Widgets.Count > 0)
@@ -209,7 +218,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
 
         SetTarget(previewTarget);
         SetViewport(PreviewWidth, PreviewHeight);
-        if (sampleBlur) SetBlurInput(blurVertical.Input);
+        if (sampleBlur) SetBlurInput(blurResult.Input);
         DrawBackground(previewBackgroundPs);
         SetViewport(Width / step, Height / step, -origin.X / step, -origin.Y / step);
         SetBlend(widgetBlend);
@@ -246,15 +255,32 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         scene[42] = new(material.Shadow.Radius, material.Shadow.X, material.Shadow.Y, lyricsStyle.BehindGlass ? 1 : 0);
         scene[43] = new(lyricsStyle.FarGlass, lyricsStyle.Depth ? 1 : 0, lyricsCards.Count == 0 ? 0 : lyricsCards[0].Padding, 0);
         for (int i = 0; i < lyricsCards.Count; i++) PackCard(scene, i, lyricsCards[i]);
-        // Preserve the existing full-scene blur rule for the shared glass pipeline.
-        bool blurEnabled = material.FullSceneBlur && material.Blur > 0 && !lyricsStyle.BehindGlass && material.Strength > 0;
+        bool blurEnabled = material.Blur > 0 && !lyricsStyle.BehindGlass && material.Strength > 0;
         bool sampleBlur = blurEnabled && (lyricsCards.Count != 0 || hasWidgets);
-        int blurWidth = (Width + 1) / 2, blurHeight = (Height + 1) / 2;
-        scene[44] = new(blurWidth, blurHeight, material.Blur * Height / 1080f, sampleBlur ? 1 : 0);
+        float blurRadius = material.Blur * Height / 1080f;
+        int downsampleGrid = 2;
+        Size blurSize = Size.Empty;
+        float mipLevel = 0;
+        if (sampleBlur)
+        {
+            if (material.FullSceneBlur)
+                blurSize = GaussianBlurKernel.TargetSize(Width, Height, blurRadius, out downsampleGrid);
+            else
+            {
+                blurSize = new((Width + 1) / 2, (Height + 1) / 2);
+                // The mip footprint and the four neighboring samples together set the blur width.
+                mipLevel = MathF.Log2(Math.Max(1, .85f * blurRadius * blurSize.Height / Height));
+            }
+        }
+        scene[44] = new(blurSize.Width, blurSize.Height, mipLevel, sampleBlur ? (material.FullSceneBlur ? 1 : 2) : 0);
         WriteConstants(scene);
 
         if (sampleBlur)
-            BuildBlur(new BlurKey(view.Layout, view.Zoom, view.X, view.Y, material.Blur), blurWidth, blurHeight);
+        {
+            // The ordinary blur levels depend on the background transform. Moving the radius slider only selects a level.
+            var key = new BlurKey(view, material.FullSceneBlur ? material.Blur : 0);
+            BuildBlur(key, blurSize, blurRadius * blurSize.Height / Height, downsampleGrid);
+        }
         else if (!blurEnabled)
             ReleaseBlur();
 
@@ -346,11 +372,13 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         return new(color.R / 255f, color.G / 255f, color.B / 255f, alpha);
     }
 
-    private void WriteConstants(Span<Vector4> scene)
+    private void WriteConstants(Span<Vector4> scene) => WriteBuffer(constants, scene);
+
+    private void WriteBuffer(nint buffer, ReadOnlySpan<Vector4> values)
     {
-        fixed (Vector4* data = scene)
+        fixed (Vector4* data = values)
             ((delegate* unmanaged[Stdcall]<nint, nint, uint, nint, void*, uint, uint, void>)Slot(context, (int)Context.UpdateSubresource))
-                (context, constants, 0, 0, data, 0, 0);
+                (context, buffer, 0, 0, data, 0, 0);
     }
 
     private void DrawCards(nint pixelShader, uint count)
@@ -364,39 +392,57 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         ((delegate* unmanaged[Stdcall]<nint, nint, nint, uint, void>)Slot(context, (int)Context.OMSetBlendState))
             (context, state, 0, uint.MaxValue);
 
-    private void BuildBlur(BlurKey desired, int width, int height)
+    private void BuildBlur(BlurKey desired, Size size, float radius, int downsampleGrid)
     {
         if (cachedBlur == desired) return;
-        if (blurHorizontal.Target == 0)
+        bool mipmapped = desired.GaussianRadius == 0;
+        if (blurSurface != (size, mipmapped)) ReleaseBlur();
+        if (blurResult.Target == 0)
         {
             try
             {
-                blurHorizontal = CreateBlurSurface(width, height);
-                blurVertical = CreateBlurSurface(width, height);
+                blurResult = CreateBlurSurface(size, mipmapped);
+                if (!mipmapped) blurHorizontal = CreateBlurSurface(size, mipmapped: false);
+                blurSurface = (size, mipmapped);
             }
             catch { ReleaseBlur(); throw; }
         }
 
-        SetViewport(width, height);
-        // D3D11 forbids binding the same texture as an SRV and an RTV.
+        Span<Vector4> kernel = stackalloc Vector4[GaussianBlurKernel.VectorCount];
+        GaussianBlurKernel.Write(kernel, mipmapped ? 0 : radius, downsampleGrid);
+        WriteBuffer(blurConstants, kernel);
+        SetViewport(size.Width, size.Height);
+
         SetBlurInput(0);
-        SetTarget(blurHorizontal.Target);
-        SetShaders(backgroundVs, blurHorizontalPs);
-        ((delegate* unmanaged[Stdcall]<nint, uint, uint, void>)Slot(context, (int)Context.Draw))(context, 3, 0);
-        SetTarget(blurVertical.Target);
-        SetBlurInput(blurHorizontal.Input);
-        SetShaders(backgroundVs, blurVerticalPs);
-        ((delegate* unmanaged[Stdcall]<nint, uint, uint, void>)Slot(context, (int)Context.Draw))(context, 3, 0);
+        SetTarget(blurResult.Target);
+        DrawBackground(blurDownsamplePs);
+        if (mipmapped)
+        {
+            // Mip generation reads from the same resource, so unbind its render target first.
+            SetTarget(0);
+            ((delegate* unmanaged[Stdcall]<nint, nint, void>)Slot(context, (int)Context.GenerateMips))(context, blurResult.Input);
+        }
+        else
+        {
+            // Reuse the prefilter target for the vertical result after the horizontal pass reads it.
+            SetTarget(blurHorizontal.Target);
+            SetBlurInput(blurResult.Input);
+            DrawBackground(blurHorizontalPs);
+            SetBlurInput(0);
+            SetTarget(blurResult.Target);
+            SetBlurInput(blurHorizontal.Input);
+            DrawBackground(blurVerticalPs);
+        }
         cachedBlur = desired;
         BlurBuilds++;
     }
 
-    private (nint Target, nint Input) CreateBlurSurface(int width, int height)
+    private (nint Target, nint Input) CreateBlurSurface(Size size, bool mipmapped)
     {
         nint texture = CreateTexture(new TextureDescription
         {
-            Width = (uint)width, Height = (uint)height, MipLevels = 1, ArraySize = 1,
-            Format = Bgra8, SampleCount = 1, BindFlags = 0x20 | 8
+            Width = (uint)size.Width, Height = (uint)size.Height, MipLevels = mipmapped ? 0u : 1u, ArraySize = 1,
+            Format = Bgra8, SampleCount = 1, BindFlags = 0x20 | 8, Misc = mipmapped ? 1u : 0u
         }, null);
         try
         {
@@ -409,16 +455,17 @@ internal sealed unsafe class D3D11Renderer : IDisposable
 
     private void ReleaseBlur()
     {
-        if (blurHorizontal.Target == 0) return;
+        if (blurResult.Target == 0) return;
         SetBlurInput(0);
-        Marshal.Release(blurHorizontal.Target);
-        Marshal.Release(blurHorizontal.Input);
-        if (blurVertical.Target != 0)
+        Marshal.Release(blurResult.Target);
+        Marshal.Release(blurResult.Input);
+        if (blurHorizontal.Target != 0)
         {
-            Marshal.Release(blurVertical.Target);
-            Marshal.Release(blurVertical.Input);
+            Marshal.Release(blurHorizontal.Target);
+            Marshal.Release(blurHorizontal.Input);
         }
-        blurHorizontal = blurVertical = default;
+        blurHorizontal = blurResult = default;
+        blurSurface = default;
         cachedBlur = null;
     }
 
@@ -520,14 +567,16 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         nint buffer = constants;
         BindResources(Context.VSSetConstantBuffers, 1, &buffer);
         BindResources(Context.PSSetConstantBuffers, 1, &buffer);
+        nint kernel = blurConstants;
+        BindResources(Context.PSSetConstantBuffers, 1, &kernel, startSlot: 1);
         nint filter = sampler;
         BindResources(Context.PSSetSamplers, 1, &filter);
         nint* textures = stackalloc nint[] { background, lyrics };
         BindResources(Context.PSSetShaderResources, 2, textures);
     }
 
-    private void BindResources(Context member, uint count, nint* resources) =>
-        ((delegate* unmanaged[Stdcall]<nint, uint, uint, nint*, void>)Slot(context, (int)member))(context, 0, count, resources);
+    private void BindResources(Context member, uint count, nint* resources, uint startSlot = 0) =>
+        ((delegate* unmanaged[Stdcall]<nint, uint, uint, nint*, void>)Slot(context, (int)member))(context, startSlot, count, resources);
 
     private void SetShaders(nint vertex, nint pixel)
     {
@@ -618,11 +667,11 @@ internal sealed unsafe class D3D11Renderer : IDisposable
     {
         ReleasePreviewResources();
         ReleaseBlur();
-        foreach (nint resource in new[] { context, target, constants, sampler, lyrics, atlasTexture, background,
-            cardPs, cardVs, backgroundPs, backgroundVs, blurHorizontalPs, blurVerticalPs, widgetPs, widgetBlend, chain, device })
+        foreach (nint resource in new[] { context, target, constants, blurConstants, sampler, lyrics, atlasTexture, background,
+            cardPs, cardVs, backgroundPs, backgroundVs, blurDownsamplePs, blurHorizontalPs, blurVerticalPs, widgetPs, widgetBlend, chain, device })
             if (resource != 0) Marshal.Release(resource);
-        context = target = constants = sampler = lyrics = atlasTexture = background = cardPs = cardVs =
-            backgroundPs = backgroundVs = blurHorizontalPs = blurVerticalPs = widgetPs = widgetBlend = chain = device = 0;
+        context = target = constants = blurConstants = sampler = lyrics = atlasTexture = background = cardPs = cardVs =
+            backgroundPs = backgroundVs = blurDownsamplePs = blurHorizontalPs = blurVerticalPs = widgetPs = widgetBlend = chain = device = 0;
     }
 
     private static nint Slot(nint instance, int slot) => (*(nint**)instance)[slot];

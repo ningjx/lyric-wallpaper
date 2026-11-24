@@ -19,9 +19,15 @@ cbuffer Scene : register(b0)
     float4 Shadow;
     float4 ShadowShape;        // radius, XY offset, lyrics behind glass
     float4 Depth;              // far glass opacity, depth enabled, card padding, clock press
-    float4 BlurPass;           // downsampled target dimensions, radius in render pixels, active
+    float4 BlurPass;           // downsampled target dimensions, mip level, mode (off, Gaussian, mip)
     float4 GlyphUv[16];        // atlas origin and extent of the visible glyphs
     float4 PreviewWindow;      // scene origin and scene pixels per preview pixel
+};
+
+cbuffer BlurKernel : register(b1)
+{
+    float4 BlurParameters;     // center weight, pair count, downsample grid size
+    float4 BlurPairs[8];        // offset in texels, normalized weight of two adjacent taps
 };
 
 struct Vertex
@@ -64,20 +70,32 @@ float4 PreviewBackgroundPixel(Vertex v) : SV_Target
     return float4(SampleBackground(PreviewWindow.xy + v.position.xy * PreviewWindow.zw), 1);
 }
 
-float3 BlurSource(float2 uv, bool horizontal)
+float4 BlurDownsample(Vertex v) : SV_Target
 {
-    return horizontal ? SampleBackground(saturate(uv) * View.xy) : BlurTexture.Sample(LinearClamp, uv).rgb;
+    int grid = (int)BlurParameters.z;
+    float2 footprint = View.xy / BlurPass.xy;
+    float2 spacing = footprint / grid;
+    float2 first = (v.position.xy - 0.5) * footprint + 0.5 * spacing;
+    float3 color = 0;
+    [loop] for (int y = 0; y < grid; ++y)
+    {
+        [loop] for (int x = 0; x < grid; ++x)
+            color += SampleBackground(first + float2(x, y) * spacing);
+    }
+    return float4(color / (grid * grid), 1);
 }
 
 float4 BlurAxis(Vertex v, bool horizontal) : SV_Target
 {
     float2 uv = v.position.xy / BlurPass.xy;
-    float2 stepUv = horizontal ? float2(BlurPass.z / View.x, 0) : float2(0, BlurPass.z / View.y);
-    // Symmetric seven-tap weights. The radius controls the same screen-space footprint at any DPR.
-    float3 color = BlurSource(uv, horizontal) * 0.28;
-    color += (BlurSource(uv - stepUv / 3.0, horizontal) + BlurSource(uv + stepUv / 3.0, horizontal)) * 0.22;
-    color += (BlurSource(uv - stepUv * (2.0 / 3.0), horizontal) + BlurSource(uv + stepUv * (2.0 / 3.0), horizontal)) * 0.10;
-    color += (BlurSource(uv - stepUv, horizontal) + BlurSource(uv + stepUv, horizontal)) * 0.04;
+    float2 stepUv = horizontal ? float2(1 / BlurPass.x, 0) : float2(0, 1 / BlurPass.y);
+    float3 color = BlurTexture.SampleLevel(LinearClamp, uv, 0).rgb * BlurParameters.x;
+    [loop] for (int pair = 0; pair < (int)BlurParameters.y; ++pair)
+    {
+        float2 offset = stepUv * BlurPairs[pair].x;
+        color += (BlurTexture.SampleLevel(LinearClamp, uv - offset, 0).rgb +
+                  BlurTexture.SampleLevel(LinearClamp, uv + offset, 0).rgb) * BlurPairs[pair].y;
+    }
     return float4(color, 1);
 }
 
@@ -105,22 +123,34 @@ float SignedDistance(float2 p, float2 halfSize, float radius)
     return length(max(q, 0)) + min(max(q.x, q.y), 0) - radius;
 }
 
+float3 SampleGlassBackground(float2 pixel, float radius)
+{
+    if (BlurPass.w == 0) return SampleBackground(pixel);
+
+    float2 uv = pixel / View.xy;
+    if (BlurPass.w == 1) return BlurTexture.Sample(LinearClamp, uv).rgb;
+
+    // Read overlapping, prefiltered regions along a rotated square to soften the mip texel grid.
+    float2 first = float2(.27, .13) * radius / View.xy;
+    float2 second = float2(-.13, .27) * radius / View.xy;
+    float level = BlurPass.z;
+    float3 color = .25 * (BlurTexture.SampleLevel(LinearClamp, uv - first, level).rgb +
+                          BlurTexture.SampleLevel(LinearClamp, uv + first, level).rgb +
+                          BlurTexture.SampleLevel(LinearClamp, uv - second, level).rgb +
+                          BlurTexture.SampleLevel(LinearClamp, uv + second, level).rgb);
+    // Blend into the half-resolution prefilter at the smallest radii.
+    return radius < 2 ? lerp(SampleBackground(pixel), color, radius * .5) : color;
+}
+
 float3 SampleGlass(float2 pixel, float2 displacement, float scale)
 {
-    bool fullBlur = BlurPass.w > 0;
-    float3 color = fullBlur ? BlurTexture.Sample(LinearClamp, pixel / View.xy).rgb : SampleBackground(pixel);
-    if (!fullBlur && Optics.z > 0 && ShadowShape.w == 0 && Appearance.w > 0)
-    {
-        float d = Optics.z * scale;
-        color = (color * 4 +
-            SampleBackground(pixel + float2(d, 0)) + SampleBackground(pixel - float2(d, 0)) +
-            SampleBackground(pixel + float2(0, d)) + SampleBackground(pixel - float2(0, d))) * 0.125;
-    }
+    float radius = Optics.z * scale;
+    float3 color = SampleGlassBackground(pixel, radius);
     if (Tone.w > 0 && Appearance.w > 0)
     {
         float2 shift = displacement * 0.055;
-        color.r = fullBlur ? BlurTexture.Sample(LinearClamp, (pixel - shift) / View.xy).r : SampleBackground(pixel - shift).r;
-        color.b = fullBlur ? BlurTexture.Sample(LinearClamp, (pixel + shift) / View.xy).b : SampleBackground(pixel + shift).b;
+        color.r = SampleGlassBackground(pixel - shift, radius).r;
+        color.b = SampleGlassBackground(pixel + shift, radius).b;
     }
     return color;
 }

@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Drawing;
+using System.Numerics;
 using System.Text.Json.Nodes;
 using LyricWallpaper.Playback;
+using LyricWallpaper.Rendering;
 using LyricWallpaper.Scene;
 using LyricWallpaper.Storage;
 using LyricWallpaper.Wallpaper;
@@ -86,6 +88,24 @@ try
         "Dock placement stays in the work area and skips occupied space");
     var bounds = new SceneViewport(1440, 810, display).ToOutput(new(720, 405), new(75, 45));
     Require(bounds == new RectangleF(1060, 560, 200, 120), "draw and hit boxes share the DPR and monitor transform");
+
+    var blurSize = GaussianBlurKernel.TargetSize(1920, 1080, 18, out int blurGrid);
+    Require(blurSize == new Size(960, 540) && blurGrid == 2, "full-scene blur at 18 covers the background before filtering");
+    blurSize = GaussianBlurKernel.TargetSize(7680, 4320, 144, out blurGrid);
+    Require(blurSize == new Size(480, 270) && blurGrid == 8, "wide high-DPR blur uses a bounded kernel");
+
+    Span<Vector4> blurKernel = stackalloc Vector4[GaussianBlurKernel.VectorCount];
+    GaussianBlurKernel.Write(blurKernel, radius: 9, downsampleGrid: 2);
+    float totalWeight = blurKernel[0].X;
+    for (int pair = 1; pair <= 5; pair++)
+    {
+        float firstTexel = pair * 2 - 1;
+        var tap = blurKernel[pair];
+        Require(tap.Y > 0 && (pair == 5 ? tap.X == firstTexel : tap.X > firstTexel && tap.X < firstTexel + 1),
+            $"blur tap pair {pair} covers adjacent texels through the radius");
+        totalWeight += 2 * tap.Y;
+    }
+    Require(blurKernel[0].Y == 5 && MathF.Abs(totalWeight - 1) < .00001f, "full-scene blur preserves flat colors");
 
     var scene = new WidgetScene(catalog);
     DateTime minute = new(2026, 1, 2, 14, 35, 0);
