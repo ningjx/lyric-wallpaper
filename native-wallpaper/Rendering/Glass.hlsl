@@ -169,7 +169,7 @@ float ShapeDistance(float2 p, float2 halfSize, float radius, bool continuous, ou
     return (axis * norm - extent) * norm * norm / gradientLength;
 }
 
-float2 LensDisplacement(float2 local, float2 normal, float rim, float amount)
+float2 LensOffset(float2 local, float2 normal, float rim, float amount)
 {
     if (rim <= 0 || amount == 0) return 0;
     if (LensShape.x > 0)
@@ -178,8 +178,10 @@ float2 LensDisplacement(float2 local, float2 normal, float rim, float amount)
         float2 direction = normal + radial;
         normal = direction * rsqrt(max(dot(direction, direction), 1e-8));
     }
-    return normal * amount * (1 - sqrt(saturate(1 - rim * rim)));
+    return normal * amount;
 }
+
+float LensBend(float rim) { return 1 - sqrt(saturate(1 - rim * rim)); }
 
 float3 ApplyRimHighlight(float3 glass, float distance, float2 normal, float scale, float strength)
 {
@@ -244,31 +246,28 @@ float3 SampleGlassBackground(float2 pixel, float radius, float blurWeight)
     return radius < 2 ? lerp(SampleBackground(pixel), color, radius * .5) : color;
 }
 
-float3 SampleGlass(float2 pixel, float2 displacement, float2 location, float radius, float blurWeight)
+float3 SampleGlass(float2 pixel, float2 offset, float rim, float radius, float blurWeight)
 {
     float3 center = SampleGlassBackground(pixel, radius, blurWeight);
+    [branch] if (Tone.w == 0) return center;
+
+    // Dispersion follows the rim independently of the bend, including the straight edges.
+    float2 spread = offset * smoothstep(0, 1, rim) * (Tone.w == 2 ? .42 : .22);
+    [branch] if (dot(spread, spread) <= .0025) return center;
     [branch] if (Tone.w == 2)
     {
-        float2 spread = displacement * (location.x * location.y);
-        [branch] if (dot(spread, spread) > .0025)
-        {
-            float  red    = SampleGlassBackground(pixel + spread, radius, blurWeight).r;
-            float2 orange = SampleGlassBackground(pixel + spread * (2.0 / 3.0), radius, blurWeight).rg;
-            float2 yellow = SampleGlassBackground(pixel + spread / 3.0, radius, blurWeight).rg;
-            float2 cyan   = SampleGlassBackground(pixel - spread / 3.0, radius, blurWeight).gb;
-            float  blue   = SampleGlassBackground(pixel - spread * (2.0 / 3.0), radius, blurWeight).b;
-            float2 purple = SampleGlassBackground(pixel - spread, radius, blurWeight).rb;
-            return float3((2 * (red + orange.r + yellow.r) + purple.x) / 7.0,
-                          (orange.g + 2 * (yellow.g + center.g + cyan.x)) / 7.0,
-                          (cyan.y + blue + purple.y) / 3.0);
-        }
+        float  red    = SampleGlassBackground(pixel - spread, radius, blurWeight).r;
+        float2 orange = SampleGlassBackground(pixel - spread * (2.0 / 3.0), radius, blurWeight).rg;
+        float2 yellow = SampleGlassBackground(pixel - spread / 3.0, radius, blurWeight).rg;
+        float2 cyan   = SampleGlassBackground(pixel + spread / 3.0, radius, blurWeight).gb;
+        float  blue   = SampleGlassBackground(pixel + spread * (2.0 / 3.0), radius, blurWeight).b;
+        float2 purple = SampleGlassBackground(pixel + spread, radius, blurWeight).rb;
+        return float3((2 * (red + orange.r + yellow.r) + purple.x) / 7.0,
+                      (orange.g + 2 * (yellow.g + center.g + cyan.x)) / 7.0,
+                      (cyan.y + blue + purple.y) / 3.0);
     }
-    else if (Tone.w == 1 && any(displacement))
-    {
-        float2 shift = displacement * 0.055;
-        center.r = SampleGlassBackground(pixel - shift, radius, blurWeight).r;
-        center.b = SampleGlassBackground(pixel + shift, radius, blurWeight).b;
-    }
+    center.r = SampleGlassBackground(pixel - spread, radius, blurWeight).r;
+    center.b = SampleGlassBackground(pixel + spread, radius, blurWeight).b;
     return center;
 }
 
@@ -372,7 +371,7 @@ Vertex WidgetVertex(uint id : SV_VertexID, uint instance : SV_InstanceID)
                 float distance = ShapeDistance(local, card.zw, radius, LensShape.y > 0, normal);
                 float rim = lensHeight > 0 ? saturate(1 + distance / max(lensHeight, 1e-5)) : 0;
                 float press = saturate(Depth.w);
-                float2 shift = LensDisplacement(local, normal, rim, Optics.y * (1 + .25 * press) * Appearance.w * scale);
+                float2 shift = LensOffset(local, normal, rim, Optics.y * (1 + .25 * press) * Appearance.w * scale) * LensBend(rim);
                 float blurWeight = GlassBlurWeight(distance, lensHeight, card.w, scale);
                 float3 backdrop = SampleGlassBackground(card.xy + local + shift, Optics.z * scale, blurWeight);
                 luminance += RelativeLuminance(GlassSurface(backdrop, Appearance.w, press, rim));
@@ -411,9 +410,10 @@ float4 GlassPixel(Vertex v, bool overlay)
     float lensHeight = Optics.x * strength * scale;
     float rim = lensHeight > 0 ? saturate(1 + distance / max(lensHeight, 1e-5)) : 0;
     float press = saturate(Depth.w);
-    float2 displacement = LensDisplacement(v.local, normal, rim, Optics.y * (1 + .25 * press) * strength * scale);
+    float2 offset = LensOffset(v.local, normal, rim, Optics.y * (1 + .25 * press) * strength * scale);
+    float2 displacement = offset * LensBend(rim);
     float blurWeight = GlassBlurWeight(distance, lensHeight, halfSize.y, scale);
-    float3 refracted = SampleGlass(v.position.xy + displacement, displacement, v.local / halfSize, Optics.z * scale, blurWeight);
+    float3 refracted = SampleGlass(v.position.xy + displacement, offset, rim, Optics.z * scale, blurWeight);
     float3 glass = GlassSurface(refracted, strength, press, rim);
 
     float2 glyph = (v.local + displacement * ShadowShape.w) / text.xy + 0.5;
