@@ -49,6 +49,7 @@ internal sealed record WallpaperSettings
     public bool Chromatic { get; init; }
     public bool SpectralDispersion { get; init; }
     public bool Highlight { get; init; } = true;
+    public bool WidgetWallpaperHighlight { get; init; }
     public HighlightStyle HighlightMode { get; init; }
     public int HighlightColor { get; init; } = unchecked((int)0xFFB8EBFF);
     public double HighlightAlpha { get; init; } = .34;
@@ -85,7 +86,7 @@ internal sealed record WallpaperSettings
         new(Glass / 100f, RefractionHeight, RefractionAmount, Blur, CornerRadius, FullSceneBlur, ProgressiveBlur,
             OpticalDepth, ContinuousCorners, new((float)Saturation, (float)Brightness, (float)Contrast, Dispersion),
             new(new(HighlightColor, Highlight ? (float)HighlightAlpha : 0),
-                (float)HighlightAngle, (float)HighlightFalloff, (float)HighlightWidth, HighlightMode),
+                (float)HighlightAngle, (float)HighlightFalloff, (float)HighlightWidth, HighlightMode, WidgetWallpaperHighlight),
             new(TintColor, (float)TintAlpha), HueTint, new(SurfaceColor, (float)SurfaceAlpha),
             new(new(ShadowColor, Shadow ? (float)ShadowAlpha : 0), ShadowRadius, ShadowX, ShadowY),
             new(InnerShadow ? (float)InnerShadowAlpha : 0, InnerShadowRadius, InnerShadowX, InnerShadowY)),

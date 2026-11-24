@@ -114,6 +114,28 @@ try
     }
     Require(blurKernel[0].Y == 5 && MathF.Abs(totalWeight - 1) < .00001f, "full-scene blur preserves flat colors");
 
+    using var lightImage = new Bitmap(128, 128);
+    using var lightCanvas = Graphics.FromImage(lightImage);
+    lightCanvas.Clear(Color.FromArgb(24, 24, 24));
+    lightCanvas.FillRectangle(Brushes.Red, 5, 7, 20, 20);
+    lightCanvas.FillRectangle(Brushes.Cyan, 98, 78, 20, 20);
+    var lights = new WallpaperLightMap(lightImage);
+    var screen = new Vector2(1920, 1080);
+    var source = lights.Find(screen, Vector2.One, 1, Vector2.Zero, tile: false);
+    Require(source is { } cyan && cyan.Position.X > 1500 && cyan.Position.Y > 650 &&
+        cyan.Color.Z > cyan.Color.X + .3f, "visible dominant light preserves its cool color and screen location");
+    var cropped = lights.Find(screen, Vector2.One, 2, new(.65f, .65f), tile: false);
+    Require(cropped is { } warm && warm.Position.X < 950 && warm.Position.Y < 600 &&
+        warm.Color.X > warm.Color.Z + .3f, "cropping excludes the hidden light and remaps the visible warm light");
+    var fixture = source!.Value;
+    Require(Math.Abs(fixture.At(fixture.Position - new Vector2(200, 0), screen.Y).Angle) < .001 &&
+        Math.Abs(Math.Abs(fixture.At(fixture.Position + new Vector2(200, 0), screen.Y).Angle) - MathF.PI) < .001 &&
+        fixture.At(fixture.Position, screen.Y).Focus == 0,
+        "widgets on opposite sides of the light face opposite directions with a neutral center");
+    lightCanvas.Clear(Color.LightGray);
+    Require(new WallpaperLightMap(lightImage).Find(screen, Vector2.One, 1, Vector2.Zero, tile: false) is null,
+        "flat wallpaper falls back to manual highlight");
+
     var scene = new WidgetScene(catalog);
     DateTime minute = new(2026, 1, 2, 14, 35, 0);
     scene.Update(saved, isIdle: false, isEditing: false, minute);
@@ -169,14 +191,17 @@ try
         "turning off lyric depth does not change optical depth");
     var legacyStyle = legacyWallpaper.ToSceneStyle();
     Require(legacyStyle.Glass is { Tone.Dispersion: ChromaticMode.Rgb, ProgressiveBlur: false, HueTint: false } &&
-        legacyStyle.Lyrics.AdaptiveContrast, "legacy RGB stays RGB, with conservative optics and adaptive outline defaults");
+        !legacyStyle.Glass.Highlight.FollowWallpaper && legacyStyle.Lyrics.AdaptiveContrast,
+        "legacy RGB stays RGB, with manual highlight and adaptive outline defaults");
 
     wallpaper.Save(legacyWallpaper with
     {
-        ProgressiveBlur = true, SpectralDispersion = true, HueTint = true, AdaptiveContrast = false, BehindGlass = true
+        ProgressiveBlur = true, SpectralDispersion = true, HueTint = true, AdaptiveContrast = false, BehindGlass = true,
+        WidgetWallpaperHighlight = true
     });
     var advancedStyle = wallpaper.Load().ToSceneStyle();
-    Require(advancedStyle.Glass is { ProgressiveBlur: true, Tone.Dispersion: ChromaticMode.Spectral, HueTint: true } &&
+    Require(advancedStyle.Glass is { ProgressiveBlur: true, Tone.Dispersion: ChromaticMode.Spectral, HueTint: true,
+        Highlight.FollowWallpaper: true } &&
         advancedStyle.Lyrics is { AdaptiveContrast: false, BehindGlass: true },
         "advanced glass options persist and spectral dispersion takes precedence over legacy RGB");
     Require(new WallpaperSettings().Dispersion == ChromaticMode.Off, "spectral dispersion remains opt-in");

@@ -461,11 +461,23 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
     {
         var grid = Fields();
         Boolean(grid, "启用高光", wallpaper.Highlight, (s, v) => s with { Highlight = v });
+        var followWallpaper = Boolean(grid, "控件高光跟随壁纸", wallpaper.WidgetWallpaperHighlight,
+            (s, v) => s with { WidgetWallpaperHighlight = v },
+            "根据壁纸可见区域的主亮区为每个控件计算高光方向和颜色。找不到明显亮区时沿用已保存的手动值。");
         Option(grid, "高光模式", ["默认", "环境", "纯净"], (int)wallpaper.HighlightMode,
             (s, v) => s with { HighlightMode = (HighlightStyle)v });
-        ColorField(grid, "高光颜色", wallpaper.HighlightColor, (s, v) => s with { HighlightColor = v });
+        var highlightColor = ColorField(grid, "高光颜色", wallpaper.HighlightColor, (s, v) => s with { HighlightColor = v });
         Decimal(grid, "高光强度", wallpaper.HighlightAlpha, 0, 1, .01, (s, v) => s with { HighlightAlpha = v });
-        Decimal(grid, "高光角度", wallpaper.HighlightAngle, -3.14, 3.14, .01, (s, v) => s with { HighlightAngle = v });
+        var highlightAngle = Decimal(grid, "高光角度", wallpaper.HighlightAngle, -3.14, 3.14, .01, (s, v) => s with { HighlightAngle = v });
+        void UpdateManualHighlight()
+        {
+            bool enabled = followWallpaper.IsChecked != true;
+            highlightAngle.IsEnabled = highlightColor.IsEnabled = enabled;
+            highlightAngle.Opacity = highlightColor.Opacity = enabled ? 1 : .5;
+        }
+        followWallpaper.Checked += (_, _) => UpdateManualHighlight();
+        followWallpaper.Unchecked += (_, _) => UpdateManualHighlight();
+        UpdateManualHighlight();
         Decimal(grid, "高光衰减", wallpaper.HighlightFalloff, .2, 5, .01, (s, v) => s with { HighlightFalloff = v });
         Decimal(grid, "高光边缘宽度", wallpaper.HighlightWidth, .2, 6, .1, (s, v) => s with { HighlightWidth = v });
         Boolean(grid, "启用外阴影", wallpaper.Shadow, (s, v) => s with { Shadow = v });
@@ -600,13 +612,14 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         Func<WallpaperSettings, int, WallpaperSettings> setter, int step = 1) =>
         Decimal(grid, label, initial, min, max, step, (s, value) => setter(s, (int)Math.Round(value)));
 
-    private void Decimal(Ui.Grid grid, string label, double initial, double min, double max, double step,
+    private W.FrameworkElement Decimal(Ui.Grid grid, string label, double initial, double min, double max, double step,
         Func<WallpaperSettings, double, WallpaperSettings> setter)
     {
-        Number(grid, label, initial, min, max, step, number =>
+        Number(grid, label, initial, min, max, step, out var field, number =>
         {
             if (number is double value) QueueWallpaper(s => setter(s, value));
         });
+        return field;
     }
 
     private void Option(Ui.Grid grid, string label, string[] values, int selected,
@@ -620,7 +633,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         };
     }
 
-    private void Boolean(Ui.Grid grid, string label, bool initial, Func<WallpaperSettings, bool, WallpaperSettings> setter,
+    private Fluent.ToggleSwitch Boolean(Ui.Grid grid, string label, bool initial, Func<WallpaperSettings, bool, WallpaperSettings> setter,
         string? hint = null)
     {
         var check = new Fluent.ToggleSwitch
@@ -633,9 +646,10 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         check.Checked += (_, _) => QueueWallpaper(s => setter(s, true));
         check.Unchecked += (_, _) => QueueWallpaper(s => setter(s, false));
         AddField(grid, "", check);
+        return check;
     }
 
-    private void ColorField(Ui.Grid grid, string label, int initial, Func<WallpaperSettings, int, WallpaperSettings> setter)
+    private W.FrameworkElement ColorField(Ui.Grid grid, string label, int initial, Func<WallpaperSettings, int, WallpaperSettings> setter)
     {
         int color = initial;
         var swatch = new Ui.Border
@@ -658,11 +672,15 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         });
         pickColor.HorizontalAlignment = W.HorizontalAlignment.Left;
         W.Automation.AutomationProperties.SetName(pickColor, "选择" + label);
-        AddField(grid, label, pickColor);
+        return AddField(grid, label, pickColor);
     }
 
     private Func<double> Number(Ui.Grid grid, string label, double initial, double min, double max, double step,
-        Action<double?> changed)
+        Action<double?> changed) =>
+        Number(grid, label, initial, min, max, step, out _, changed);
+
+    private Func<double> Number(Ui.Grid grid, string label, double initial, double min, double max, double step,
+        out W.FrameworkElement field, Action<double?> changed)
     {
         initial = Math.Clamp(initial, min, max);
         var slider = new Ui.Slider { Minimum = min, Maximum = max, Value = initial, TickFrequency = step,
@@ -700,7 +718,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         {
             if (!TryRead(out _)) input.Text = slider.Value.ToString(CultureInfo.InvariantCulture);
         };
-        AddField(grid, label, Inline(slider, input));
+        field = AddField(grid, label, Inline(slider, input));
         return () =>
         {
             if (!TryRead(out double value))
@@ -731,7 +749,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         return grid;
     }
 
-    private void AddField(Ui.Grid grid, string label, W.FrameworkElement element, bool full = false)
+    private W.FrameworkElement AddField(Ui.Grid grid, string label, W.FrameworkElement element, bool full = false)
     {
         int cell = grid.Children.Count;
         int row = 0, column = 0;
@@ -756,6 +774,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         Ui.Grid.SetColumn(group, column);
         Ui.Grid.SetColumnSpan(group, full ? 2 : 1);
         grid.Children.Add(group);
+        return group;
     }
 
     private static Ui.Grid Inline(W.FrameworkElement main, params W.FrameworkElement[] suffix)

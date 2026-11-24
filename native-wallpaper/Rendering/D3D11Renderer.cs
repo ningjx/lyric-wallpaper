@@ -32,7 +32,11 @@ internal sealed unsafe class D3D11Renderer : IDisposable
     private readonly record struct BlurKey(BackgroundView View, int GaussianRadius);
     private BlurKey? cachedBlur;
     private int backgroundWidth, backgroundHeight;
-    public const int SceneVectors = 65;
+    private Bitmap backgroundBitmap;
+    private WallpaperLightMap? lightMap;
+    private (BackgroundView View, int Width, int Height)? lightKey;
+    private WallpaperLight? wallpaperLight;
+    public const int SceneVectors = 66;
     public int OutputWidth { get; }
     public int OutputHeight { get; }
     public int Width { get; private set; }
@@ -49,6 +53,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         (Width, Height) = ScaledSize(renderScale);
         backgroundWidth = backgroundBitmap.Width;
         backgroundHeight = backgroundBitmap.Height;
+        this.backgroundBitmap = backgroundBitmap;
         try
         {
             var description = new SwapChainDescription
@@ -180,6 +185,9 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         background = next;
         backgroundWidth = bitmap.Width;
         backgroundHeight = bitmap.Height;
+        backgroundBitmap = bitmap;
+        lightMap = null;
+        lightKey = null;
         cachedBlur = null;
         nint* textures = stackalloc nint[] { background, lyrics };
         BindResources(Context.PSSetShaderResources, 2, textures);
@@ -199,8 +207,9 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         if (frame.Lyrics.Count != 0) DrawCards(cardVs, cardPs, (uint)frame.Lyrics.Count);
         if (frame.Widgets.Count > 0)
         {
+            var light = FindWallpaperLight(scene, frame.Style);
             SetBlend(widgetBlend);
-            foreach (var card in frame.Widgets) DrawWidget(scene, card, frame.Style.Glass.Strength, widgetPs);
+            foreach (var card in frame.Widgets) DrawWidget(scene, card, frame.Style.Glass.Strength, widgetPs, light);
             SetBlend(0);
         }
         if (capturePath is not null) SaveFrame(capturePath);
@@ -225,7 +234,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         DrawBackground(previewBackgroundPs);
         SetViewport(Width / step, Height / step, -origin.X / step, -origin.Y / step);
         SetBlend(widgetBlend);
-        DrawWidget(scene, card, style.Glass.Strength, previewWidgetPs);
+        DrawWidget(scene, card, style.Glass.Strength, previewWidgetPs, FindWallpaperLight(scene, style));
         SetBlend(0);
         SetTarget(0);
         return new(type, PreviewWidth, PreviewHeight, ReadPreviewPixels());
@@ -278,6 +287,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         scene[62] = new(material.OpticalDepth ? 1 : 0, material.ContinuousCorners ? 1 : 0, 0, 0);
         scene[63] = new(material.InnerShadow.Alpha, material.InnerShadow.Radius, material.InnerShadow.X, material.InnerShadow.Y);
         scene[64] = new(material.ProgressiveBlur ? 1 : 0, material.HueTint ? 1 : 0, lyricsStyle.AdaptiveContrast ? 1 : 0, 0);
+        scene[65] = default;
         for (int i = 0; i < lyricsCards.Count; i++) PackCard(scene, i, lyricsCards[i]);
         bool blurEnabled = material.Blur > 0 && material.Strength > 0 && (!lyricsStyle.BehindGlass || material.ProgressiveBlur);
         bool sampleBlur = blurEnabled && (lyricsCards.Count != 0 || hasWidgets);
@@ -317,12 +327,37 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         ((delegate* unmanaged[Stdcall]<nint, uint, uint, void>)Slot(context, (int)Context.Draw))(context, 3, 0);
     }
 
-    private void DrawWidget(Span<Vector4> scene, GlassCard card, float strength, nint pixelShader)
+    private WallpaperLight? FindWallpaperLight(ReadOnlySpan<Vector4> scene, SceneStyle style)
+    {
+        if (!style.Glass.Highlight.FollowWallpaper || style.Glass.Highlight.Color.Alpha <= 0 || style.Glass.Strength <= 0)
+            return null;
+        var key = (style.Background, Width, Height);
+        if (key != lightKey)
+        {
+            lightMap ??= new WallpaperLightMap(backgroundBitmap);
+            var view = scene[0];
+            var transform = scene[34];
+            wallpaperLight = lightMap.Find(new(view.X, view.Y), new(view.Z, view.W), transform.X,
+                new(transform.Y, transform.Z), transform.W > 0);
+            lightKey = key;
+        }
+        return wallpaperLight;
+    }
+
+    private void DrawWidget(Span<Vector4> scene, GlassCard card, float strength, nint pixelShader, WallpaperLight? light)
     {
         PackCard(scene, 0, card);
         scene[33] = PackColor(card.Color, strength);
         scene[43] = new(1, 0, card.Padding, card.Press);
         scene[64].W = card.AutoInvertText ? 1 : 0;
+        scene[65] = default;
+        if (light is { } source)
+        {
+            var (angle, focus) = source.At(card.Center, Height);
+            scene[65] = new(source.Color, focus);
+            scene[38].X = angle;
+            scene[38].W = 3;
+        }
         WriteConstants(scene);
         if (card.AutoInvertText && scene[44].W > 0) SetWidgetBlurInput(blurResult.Input);
         DrawCards(widgetVs, pixelShader, 1);
