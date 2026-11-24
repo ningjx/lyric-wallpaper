@@ -38,6 +38,7 @@ struct Vertex
     float4 position : SV_Position;
     float2 local : TEXCOORD0;
     nointerpolation uint index : TEXCOORD1;
+    nointerpolation float3 ink : TEXCOORD2;
 };
 
 float2 ScreenToUv(float2 p)
@@ -60,6 +61,7 @@ Vertex BackgroundVertex(uint id : SV_VertexID)
     v.position = float4(id == 1 ? 3 : -1, id == 2 ? -3 : 1, 0, 1);
     v.local = 0;
     v.index = 0;
+    v.ink = 0;
     return v;
 }
 
@@ -117,6 +119,7 @@ Vertex CardVertex(uint id : SV_VertexID, uint instance : SV_InstanceID)
     float2 pixel = Cards[instance].xy + v.local;
     v.position = float4(pixel / View.xy * float2(2, -2) + float2(-1, 1), 0, 1);
     v.index = instance;
+    v.ink = Appearance.rgb;
     return v;
 }
 
@@ -266,7 +269,7 @@ float GlyphMask(float2 coord, float4 bounds)
     return Lyrics.SampleLevel(LinearClamp, bounds.xy + coord * bounds.zw, 0);
 }
 
-float3 CompositeText(float3 glass, float2 glyph, float4 bounds, float3 text, float scale)
+float3 CompositeText(float3 glass, float2 glyph, float4 bounds, float3 text, float3 inkColor, float scale)
 {
     float2 stroke = max(0.8, 1.5 * scale) / text.xy;
     if (any(glyph < -stroke) || any(glyph > 1 + stroke)) return glass;
@@ -274,7 +277,7 @@ float3 CompositeText(float3 glass, float2 glyph, float4 bounds, float3 text, flo
     float mask = GlyphMask(glyph, bounds);
     [branch] if (MaterialOptions.z > 0 && mask < .95 && text.z > 0)
     {
-        float ink = RelativeLuminance(Appearance.rgb);
+        float ink = RelativeLuminance(inkColor);
         float backdrop = RelativeLuminance(glass);
         float contrast = (max(ink, backdrop) + .05) / (min(ink, backdrop) + .05);
         float need = 1 - smoothstep(1.4, 4.5, contrast);
@@ -289,7 +292,62 @@ float3 CompositeText(float3 glass, float2 glyph, float4 bounds, float3 text, flo
             glass = lerp(glass, keyline, outline * need * text.z * .85);
         }
     }
-    return lerp(glass, Appearance.rgb, mask * text.z);
+    return lerp(glass, inkColor, mask * text.z);
+}
+
+float CardRadius(float2 halfSize, float scale)
+{
+    return max(0, min(min(Optics.w * scale, Depth.z * 3.41421356), min(halfSize.x, halfSize.y) - 1));
+}
+
+float GlassBlurWeight(float distance, float lensHeight, float halfHeight, float scale)
+{
+    if (BlurPass.w == 0) return 0;
+    if (MaterialOptions.x <= 0) return 1;
+    float edgeWidth = min(max(1, lensHeight * .6), halfHeight * .3);
+    float centerWidth = max(edgeWidth + .5, min(halfHeight * .8, edgeWidth + 14 * scale));
+    return smoothstep(edgeWidth, centerWidth, -distance);
+}
+
+float3 GlassSurface(float3 refracted, float strength, float press, float rim)
+{
+    float gray = dot(refracted, float3(.2126, .7152, .0722));
+    float3 corrected = saturate((lerp(gray, refracted, Tone.x) - 0.5) * Tone.z + 0.5 + Tone.y);
+    refracted = lerp(refracted, corrected, saturate(Appearance.w));
+    float3 glass = ApplyTint(refracted, strength);
+    glass = lerp(glass, Surface.rgb, saturate(Surface.a * strength));
+    return lerp(glass, float3(1, 1, 1), press * (.035 + .075 * rim));
+}
+
+Vertex WidgetVertex(uint id : SV_VertexID, uint instance : SV_InstanceID)
+{
+    Vertex v = CardVertex(id, instance);
+    [branch] if (MaterialOptions.w > 0)
+    {
+        float4 card = Cards[instance];
+        float2 stepPx = Text[instance].xy * (1.0 / 3.0);
+        float scale = View.y / 1080.0;
+        float radius = CardRadius(card.zw, scale);
+        float lensHeight = Optics.x * Appearance.w * scale;
+        float luminance = 0;
+        [loop] for (int row = -1; row <= 1; row++)
+        {
+            [loop] for (int column = -1; column <= 1; column++)
+            {
+                float2 local = float2(column, row) * stepPx;
+                float2 normal;
+                float distance = ShapeDistance(local, card.zw, radius, LensShape.y > 0, normal);
+                float rim = lensHeight > 0 ? saturate(1 + distance / max(lensHeight, 1e-5)) : 0;
+                float press = saturate(Depth.w);
+                float2 shift = LensDisplacement(local, normal, rim, Optics.y * (1 + .25 * press) * Appearance.w * scale);
+                float blurWeight = GlassBlurWeight(distance, lensHeight, card.w, scale);
+                float3 backdrop = SampleGlassBackground(card.xy + local + shift, Optics.z * scale, blurWeight);
+                luminance += RelativeLuminance(GlassSurface(backdrop, Appearance.w, press, rim));
+            }
+        }
+        v.ink = 1 - step(.179, luminance / 9.0);
+    }
+    return v;
 }
 
 float4 GlassPixel(Vertex v, bool overlay)
@@ -299,7 +357,7 @@ float4 GlassPixel(Vertex v, bool overlay)
     float2 halfSize = Cards[v.index].zw;
     float scale = View.y / 1080.0;
     // The rounded corner must stay outside the rectangle occupied by the glyphs.
-    float radius = max(0, min(min(Optics.w * scale, Depth.z * 3.41421356), min(halfSize.x, halfSize.y) - 1));
+    float radius = CardRadius(halfSize, scale);
     bool continuous = LensShape.y > 0;
     float2 normal;
     float distance = ShapeDistance(v.local, halfSize, radius, continuous, normal);
@@ -321,27 +379,16 @@ float4 GlassPixel(Vertex v, bool overlay)
     float rim = lensHeight > 0 ? saturate(1 + distance / max(lensHeight, 1e-5)) : 0;
     float press = saturate(Depth.w);
     float2 displacement = LensDisplacement(v.local, normal, rim, Optics.y * (1 + .25 * press) * strength * scale);
-    float blurWeight = BlurPass.w > 0 ? 1 : 0;
-    if (blurWeight > 0 && MaterialOptions.x > 0)
-    {
-        float edgeWidth = min(max(1, lensHeight * .6), halfSize.y * .3);
-        float centerWidth = max(edgeWidth + .5, min(halfSize.y * .8, edgeWidth + 14 * scale));
-        blurWeight = smoothstep(edgeWidth, centerWidth, -distance);
-    }
+    float blurWeight = GlassBlurWeight(distance, lensHeight, halfSize.y, scale);
     float3 refracted = SampleGlass(v.position.xy + displacement, displacement, v.local / halfSize, Optics.z * scale, blurWeight);
-    float gray = dot(refracted, float3(.2126, .7152, .0722));
-    float3 corrected = saturate((lerp(gray, refracted, Tone.x) - 0.5) * Tone.z + 0.5 + Tone.y);
-    refracted = lerp(refracted, corrected, saturate(Appearance.w));
-    float3 glass = ApplyTint(refracted, strength);
-    glass = lerp(glass, Surface.rgb, saturate(Surface.a * strength));
-    glass = lerp(glass, float3(1, 1, 1), press * (.035 + .075 * rim));
+    float3 glass = GlassSurface(refracted, strength, press, rim);
 
     float2 glyph = (v.local + displacement * ShadowShape.w) / text.xy + 0.5;
     float4 bounds = GlyphUv[v.index];
-    if (ShadowShape.w > 0) glass = CompositeText(glass, glyph, bounds, text.xyz, scale);
+    if (ShadowShape.w > 0) glass = CompositeText(glass, glyph, bounds, text.xyz, v.ink, scale);
     glass *= 1 - saturate(InnerShadow.x * strength * InnerShadowMask(v.local, halfSize, radius, continuous, distance, scale));
     glass = ApplyRimHighlight(glass, distance, normal, scale, strength);
-    if (ShadowShape.w == 0) glass = CompositeText(glass, glyph, bounds, text.xyz, scale);
+    if (ShadowShape.w == 0) glass = CompositeText(glass, glyph, bounds, text.xyz, v.ink, scale);
     if (overlay)
     {
         float visibleShadow = shadowAlpha * (1 - coverage);

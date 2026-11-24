@@ -22,7 +22,7 @@ internal readonly record struct SceneViewport(int Width, int Height, Rectangle O
 }
 
 internal readonly record struct GlassCard(Vector2 Center, Vector2 Half, Vector2 Ink, Vector4 Uv, int Color,
-    float Opacity, float Padding, float Press = 0);
+    float Opacity, float Padding, float Press = 0, bool AutoInvertText = false);
 
 internal readonly record struct WidgetPreviewFrame(string Type, int Width, int Height, byte[] Pixels);
 

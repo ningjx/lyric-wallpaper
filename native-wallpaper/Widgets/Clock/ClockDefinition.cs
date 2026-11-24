@@ -10,6 +10,7 @@ internal sealed record ClockOptions : WidgetOptions
     public bool ShowDate { get; init; } = true;
     public bool Use24Hour { get; init; } = true;
     public int TextColor { get; init; } = unchecked((int)0xFFF0FBFF);
+    public bool AutoInvertText { get; init; }
     public int Padding { get; init; } = 17;
 
     public ClockOptions Normalize() => this with { Padding = Math.Clamp(Padding, 0, 64) };
@@ -46,6 +47,6 @@ internal sealed class ClockDefinition : WidgetDefinition
             time.ToString(clock.Use24Hour ? "HH:mm" : "tt h:mm", Chinese),
             clock.ShowDate ? time.ToString("M月d日 dddd", Chinese) : null,
             FontFamily);
-        return new(text, clock.TextColor, clock.Padding, minute.AddMinutes(1));
+        return new(text, clock.TextColor, clock.Padding, minute.AddMinutes(1), clock.AutoInvertText);
     }
 }

@@ -25,6 +25,8 @@ internal sealed class ClockInspector : IWidgetInspector
     private readonly Controls.Slider padding;
     private readonly Fluent.ToggleSwitch format = WidgetPropertyControls.Toggle("24 小时制");
     private readonly Fluent.ToggleSwitch date = WidgetPropertyControls.Toggle("显示日期");
+    private readonly Fluent.ToggleSwitch autoInvert = WidgetPropertyControls.Toggle("文字自动反色");
+    private readonly Controls.WrapPanel palette = new() { MinHeight = 28, Margin = new W.Thickness(0, 3, 0, 0) };
     private readonly Dictionary<int, Controls.RadioButton> colors = new();
     private ClockOptions options = new();
     private bool updating;
@@ -45,7 +47,11 @@ internal sealed class ClockInspector : IWidgetInspector
         flags.Children.Add(date);
         panel.Children.Add(flags);
 
-        var palette = new Controls.WrapPanel { MinHeight = 28, Margin = new W.Thickness(0, 3, 0, 0) };
+        autoInvert.ToolTip = "亮背景用黑字，暗背景用白字。关闭后恢复手选颜色。";
+        autoInvert.Checked += (_, _) => Set(options with { AutoInvertText = true });
+        autoInvert.Unchecked += (_, _) => Set(options with { AutoInvertText = false });
+        panel.Children.Add(autoInvert);
+
         var label = WidgetPropertyControls.Label("文字颜色");
         label.Width = 66;
         palette.Children.Add(label);
@@ -83,6 +89,8 @@ internal sealed class ClockInspector : IWidgetInspector
             padding.Value = options.Padding;
             format.IsChecked = options.Use24Hour;
             date.IsChecked = options.ShowDate;
+            autoInvert.IsChecked = options.AutoInvertText;
+            palette.IsEnabled = !options.AutoInvertText;
             foreach (var (color, swatch) in colors)
                 swatch.IsChecked = color == options.TextColor;
         }

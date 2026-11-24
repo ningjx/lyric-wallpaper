@@ -33,7 +33,7 @@ internal static class WidgetLayer
                 surfaceScale = Math.Min(surfaceScale, Math.Min(fittingScale.X, fittingScale.Y));
             }
             cards.Add(new(center, half * surfaceScale, ink * surfaceScale, glyph.Uv,
-                item.Content.Color, 1, padding * surfaceScale, pressure));
+                item.Content.Color, 1, padding * surfaceScale, pressure, item.Content.AutoInvertText));
             float sy = viewport.Output.Height / (float)viewport.Height;
             int radius = Math.Max(0, (int)(Math.Min(Math.Min(glass.Radius * viewport.Height / 1080f,
                 padding * 3.41421356f), Math.Min(half.X, half.Y) - 1) * sy));

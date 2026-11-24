@@ -33,11 +33,18 @@ try
     Require(migrated.Items.Single() is { Visibility: WidgetVisibility.Idle, Options: ClockOptions { Use24Hour: false } } original &&
         original.Id == id && original.Placement == new WidgetPlacement(new(.21f, .71f), 1.4) &&
         File.ReadAllText(paths.Widgets) == legacy, "v2 migration preserves identity and waits for first save");
-    var added = catalog.Create(clock, new WidgetPosition(.68f, .23f));
+    const int manualClockColor = unchecked((int)0xFFFFD797);
+    var added = catalog.Create(clock, new WidgetPosition(.68f, .23f)) with
+    {
+        Options = new ClockOptions { AutoInvertText = true, TextColor = manualClockColor }
+    };
     var saved = migrated with { Items = migrated.Items.Add(added) };
     store.Save(saved);
     Require(store.Load().Items.SequenceEqual(saved.Items) && File.ReadAllText(paths.Widgets + ".v2.bak") == legacy,
         "v3 round-trip and backup");
+    Require(store.Load().Items[0].Options is ClockOptions { AutoInvertText: false } &&
+        store.Load().Items[1].Options is ClockOptions { AutoInvertText: true, TextColor: manualClockColor },
+        "clock auto-inversion is per widget, opt-in for older clocks and retains the manual color");
 
     var json = JsonNode.Parse(File.ReadAllText(paths.Widgets))!.AsObject();
     var unknown = JsonNode.Parse("""
@@ -130,6 +137,8 @@ try
     var cards = new List<GlassCard>();
     var sampleText = new WidgetTestText();
     var stable = WidgetLayer.Collect(scene.Visible, viewport, default, sampleText, null, 0, true, false, cards);
+    Require(!cards[0].AutoInvertText && cards[1] is { AutoInvertText: true, Color: manualClockColor },
+        "widget rendering receives the saved auto-inversion flag and manual fallback color");
     var rest = cards[0];
     cards.Clear();
     var pressed = WidgetLayer.Collect(scene.Visible, viewport, default, sampleText, id, 1, true, false, cards);

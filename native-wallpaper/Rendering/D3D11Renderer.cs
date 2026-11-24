@@ -14,6 +14,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         CreateRenderTargetView = 9, CreateVertexShader = 12, CreatePixelShader = 15, CreateBlendState = 20, CreateSamplerState = 23 }
     private enum Context { VSSetConstantBuffers = 7, PSSetShaderResources = 8, PSSetShader = 9,
         PSSetSamplers = 10, VSSetShader = 11, Draw = 13, Map = 14, Unmap = 15, PSSetConstantBuffers = 16, DrawInstanced = 21,
+        VSSetShaderResources = 25, VSSetSamplers = 26,
         IASetPrimitiveTopology = 24, OMSetRenderTargets = 33, OMSetBlendState = 35, RSSetViewports = 44,
         CopyResource = 47, UpdateSubresource = 48, GenerateMips = 54, Flush = 111 }
     private enum SwapChain { Present = 8, GetBuffer = 9, ResizeBuffers = 13 }
@@ -24,7 +25,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
     private static readonly Guid DxgiFactory2Id = new("50c83a1c-e072-4c48-87b0-3630fa36a6d0");
     private nint device, context, chain, target, constants, blurConstants, sampler, background, lyrics, atlasTexture;
     private nint backgroundVs, backgroundPs, cardVs, cardPs, blurDownsamplePs, blurHorizontalPs, blurVerticalPs;
-    private nint widgetPs, widgetBlend;
+    private nint widgetVs, widgetPs, widgetBlend;
     private nint previewBackgroundPs, previewWidgetPs, previewTexture, previewTarget, previewStaging;
     private (nint Target, nint Input) blurHorizontal, blurResult;
     private (Size Size, bool Mipmapped) blurSurface;
@@ -78,6 +79,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
             backgroundPs = CreateShader(source, "BackgroundPixel", "ps_5_0", Device.CreatePixelShader);
             cardVs = CreateShader(source, "CardVertex", "vs_5_0", Device.CreateVertexShader);
             cardPs = CreateShader(source, "CardPixel", "ps_5_0", Device.CreatePixelShader);
+            widgetVs = CreateShader(source, "WidgetVertex", "vs_5_0", Device.CreateVertexShader);
             widgetPs = CreateShader(source, "WidgetPixel", "ps_5_0", Device.CreatePixelShader);
             blurDownsamplePs = CreateShader(source, "BlurDownsample", "ps_5_0", Device.CreatePixelShader);
             blurHorizontalPs = CreateShader(source, "BlurHorizontal", "ps_5_0", Device.CreatePixelShader);
@@ -181,6 +183,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         cachedBlur = null;
         nint* textures = stackalloc nint[] { background, lyrics };
         BindResources(Context.PSSetShaderResources, 2, textures);
+        BindResources(Context.VSSetShaderResources, 1, textures);
     }
 
     public bool Draw(SceneFrame frame, string? capturePath)
@@ -193,7 +196,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         SetViewport(Width, Height);
         if (sampleBlur) SetBlurInput(blurResult.Input);
         DrawBackground(backgroundPs);
-        if (frame.Lyrics.Count != 0) DrawCards(cardPs, (uint)frame.Lyrics.Count);
+        if (frame.Lyrics.Count != 0) DrawCards(cardVs, cardPs, (uint)frame.Lyrics.Count);
         if (frame.Widgets.Count > 0)
         {
             SetBlend(widgetBlend);
@@ -301,8 +304,11 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         PackCard(scene, 0, card);
         scene[33] = PackColor(card.Color, strength);
         scene[43] = new(1, 0, card.Padding, card.Press);
+        scene[64].W = card.AutoInvertText ? 1 : 0;
         WriteConstants(scene);
-        DrawCards(pixelShader, 1);
+        if (card.AutoInvertText && scene[44].W > 0) SetWidgetBlurInput(blurResult.Input);
+        DrawCards(widgetVs, pixelShader, 1);
+        if (card.AutoInvertText && scene[44].W > 0) SetWidgetBlurInput(0);
     }
 
     private void EnsurePreviewResources()
@@ -384,9 +390,9 @@ internal sealed unsafe class D3D11Renderer : IDisposable
                 (context, buffer, 0, 0, data, 0, 0);
     }
 
-    private void DrawCards(nint pixelShader, uint count)
+    private void DrawCards(nint vertexShader, nint pixelShader, uint count)
     {
-        SetShaders(cardVs, pixelShader);
+        SetShaders(vertexShader, pixelShader);
         ((delegate* unmanaged[Stdcall]<nint, uint, uint, uint, uint, void>)Slot(context, (int)Context.DrawInstanced))
             (context, 6, count, 0, 0);
     }
@@ -564,6 +570,9 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         ((delegate* unmanaged[Stdcall]<nint, uint, uint, nint*, void>)Slot(context, (int)Context.PSSetShaderResources))
             (context, 2, 1, &input);
 
+    private void SetWidgetBlurInput(nint input) =>
+        BindResources(Context.VSSetShaderResources, 1, &input, startSlot: 2);
+
     private void BindScene()
     {
         ((delegate* unmanaged[Stdcall]<nint, uint, void>)Slot(context, (int)Context.IASetPrimitiveTopology))(context, 4);
@@ -574,8 +583,10 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         BindResources(Context.PSSetConstantBuffers, 1, &kernel, startSlot: 1);
         nint filter = sampler;
         BindResources(Context.PSSetSamplers, 1, &filter);
+        BindResources(Context.VSSetSamplers, 1, &filter);
         nint* textures = stackalloc nint[] { background, lyrics };
         BindResources(Context.PSSetShaderResources, 2, textures);
+        BindResources(Context.VSSetShaderResources, 1, textures);
     }
 
     private void BindResources(Context member, uint count, nint* resources, uint startSlot = 0) =>
@@ -671,10 +682,10 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         ReleasePreviewResources();
         ReleaseBlur();
         foreach (nint resource in new[] { context, target, constants, blurConstants, sampler, lyrics, atlasTexture, background,
-            cardPs, cardVs, backgroundPs, backgroundVs, blurDownsamplePs, blurHorizontalPs, blurVerticalPs, widgetPs, widgetBlend, chain, device })
+            cardPs, cardVs, backgroundPs, backgroundVs, blurDownsamplePs, blurHorizontalPs, blurVerticalPs, widgetVs, widgetPs, widgetBlend, chain, device })
             if (resource != 0) Marshal.Release(resource);
         context = target = constants = blurConstants = sampler = lyrics = atlasTexture = background = cardPs = cardVs =
-            backgroundPs = backgroundVs = blurDownsamplePs = blurHorizontalPs = blurVerticalPs = widgetPs = widgetBlend = chain = device = 0;
+            backgroundPs = backgroundVs = blurDownsamplePs = blurHorizontalPs = blurVerticalPs = widgetVs = widgetPs = widgetBlend = chain = device = 0;
     }
 
     private static nint Slot(nint instance, int slot) => (*(nint**)instance)[slot];

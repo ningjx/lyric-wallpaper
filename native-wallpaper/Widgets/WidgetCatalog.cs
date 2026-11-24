@@ -36,4 +36,4 @@ internal abstract class WidgetDefinition
     public abstract Size EstimateSize(Rectangle display);
 }
 
-internal readonly record struct WidgetContent(SceneText Text, int Color, int Padding, DateTime RefreshAt);
+internal readonly record struct WidgetContent(SceneText Text, int Color, int Padding, DateTime RefreshAt, bool AutoInvertText = false);
