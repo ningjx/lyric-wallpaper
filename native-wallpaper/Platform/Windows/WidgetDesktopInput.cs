@@ -2,7 +2,8 @@ using LyricWallpaper.Scene;
 
 namespace LyricWallpaper.Platform.Windows;
 
-internal readonly record struct WidgetEditorLayout(Rectangle Display, Rectangle WorkArea, WidgetLayout[] Items, nint IconView, nint WallpaperView);
+internal readonly record struct WidgetEditorLayout(Rectangle Display, Rectangle WorkArea, WidgetLayout[] Items, nint IconView,
+    nint WallpaperView, WidgetEditorBackdrop? Backdrop);
 internal readonly record struct WidgetHold(Guid Id, Point Pointer);
 
 internal sealed class WidgetDesktopInput(bool preview) : IDisposable

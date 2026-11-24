@@ -26,6 +26,8 @@ internal readonly record struct GlassCard(Vector2 Center, Vector2 Half, Vector2 
 
 internal readonly record struct WidgetPreviewFrame(string Type, int Width, int Height, byte[] Pixels);
 
+internal sealed record WidgetEditorBackdrop(int Width, int Height, byte[] Pixels);
+
 internal readonly record struct WidgetLayout(Guid Id, RectangleF Bounds, int Radius)
 {
     public bool Contains(Point point)

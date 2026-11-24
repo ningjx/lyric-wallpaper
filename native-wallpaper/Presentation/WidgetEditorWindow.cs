@@ -4,9 +4,9 @@ using W = System.Windows;
 using Controls = System.Windows.Controls;
 using Primitives = System.Windows.Controls.Primitives;
 using Input = System.Windows.Input;
+using Imaging = System.Windows.Media.Imaging;
 using Media = System.Windows.Media;
 using Shapes = System.Windows.Shapes;
-using Fluent = Wpf.Ui.Controls;
 using LyricWallpaper.Platform.Windows;
 using LyricWallpaper.Scene;
 using LyricWallpaper.Widgets;
@@ -16,8 +16,8 @@ namespace LyricWallpaper.Presentation;
 internal sealed class WidgetEditorWindow : W.Window
 {
     private static readonly Media.Brush Accent = Brush(0xFF0067C0);
-    private static readonly Media.Brush Surface = Brush(0xFFF6F8FB);
-    private static readonly Media.Brush BorderColor = Brush(0xFFD5DCE4);
+    private static readonly Media.Brush Surface = Brush(0xFFF2F5F9);
+    private static readonly Media.Brush BorderColor = Brush(0xDDFFFFFF);
     private static readonly Media.Brush Ink = Brush(0xFF20252D);
     private const double HandleSize = 11, RemoveSize = 26;
 
@@ -37,9 +37,7 @@ internal sealed class WidgetEditorWindow : W.Window
     private readonly WidgetDock dock;
     private readonly WindowInputRegion inputRegion = new();
     private readonly Controls.StackPanel properties = new() { Visibility = W.Visibility.Collapsed };
-    private readonly Controls.Slider scale;
     private readonly Controls.Button remove = new() { Width = RemoveSize, Height = RemoveSize, ToolTip = "删除控件" };
-    private readonly Fluent.ToggleSwitch idleOnly = WidgetPropertyControls.Toggle("仅闲时显示");
     private readonly Controls.ContentControl inspectorHost = new();
     private IWidgetInspector? inspector;
     private string? inspectorType;
@@ -52,12 +50,12 @@ internal sealed class WidgetEditorWindow : W.Window
     private (Point Position, bool Released) heldPointer;
     private Rectangle[] icons = [];
     private nint iconOwner, hwnd;
-    private bool queryingIcons, closed, updatingProperties;
+    private bool queryingIcons, closed;
     private Gesture? gesture;
-    private (WidgetEditSnapshot Before, Primitives.Thumb Thumb)? propertyDrag;
-    private W.Rect propertyBounds = W.Rect.Empty;
+    private WidgetEditorBackdrop? appliedBackdrop;
+    private Media.ImageBrush? propertyBackdrop;
     private double? snapX, snapY;
-    private bool IsInteracting => gesture is not null || propertyDrag is not null;
+    private bool IsInteracting => gesture is not null;
 
     public WidgetEditorWindow(WidgetDocument document, WidgetHold? hold, WidgetCatalog catalog,
         Action<WidgetDocument, bool> apply, Action<Guid?> setDragging, Action<bool> showDockPreviews)
@@ -126,33 +124,15 @@ internal sealed class WidgetEditorWindow : W.Window
         if (document.ReadOnlyReason is { } reason)
             rows.Children.Add(new Controls.TextBlock { Text = reason, TextWrapping = W.TextWrapping.Wrap });
 
-        properties.Children.Add(WidgetPropertyControls.Range("缩放", WidgetPlacement.MinScale * 100,
-            WidgetPlacement.MaxScale * 100, "{0:0}%", out scale));
-        scale.ValueChanged += (_, e) =>
-        {
-            if (!updatingProperties && session.Selected is { } item)
-                ChangeProperty(session.WithPlacement(item.Placement with { Scale = e.NewValue / 100 }));
-        };
         properties.Children.Add(inspectorHost);
-        properties.Children.Add(idleOnly);
-        idleOnly.Margin = new W.Thickness(0, 3, 0, 0);
-        idleOnly.Checked += (_, _) => SetVisibility(WidgetVisibility.Idle);
-        idleOnly.Unchecked += (_, _) => SetVisibility(WidgetVisibility.Always);
 
         propertyPanel = new Controls.Border
         {
             Child = rows, Background = Surface, BorderBrush = BorderColor, BorderThickness = new W.Thickness(1),
-            CornerRadius = new W.CornerRadius(10), Padding = new W.Thickness(10, 7, 10, 7), Visibility = W.Visibility.Collapsed
+            CornerRadius = new W.CornerRadius(12), Padding = new W.Thickness(12, 8, 12, 8), Visibility = W.Visibility.Collapsed
         };
+        W.Automation.AutomationProperties.SetAutomationId(propertyPanel, "WidgetProperties");
         propertyPanel.SizeChanged += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(LayoutParts));
-        propertyPanel.AddHandler(Primitives.Thumb.DragStartedEvent, new Primitives.DragStartedEventHandler((_, e) =>
-        {
-            if (!IsInteracting && e.OriginalSource is Primitives.Thumb thumb) propertyDrag = (State, thumb);
-        }), true);
-        propertyPanel.AddHandler(Primitives.Thumb.DragCompletedEvent, new Primitives.DragCompletedEventHandler((_, e) =>
-        {
-            if (ReferenceEquals(propertyDrag?.Thumb, e.OriginalSource)) FinishPropertyDrag(e.Canceled);
-        }), true);
         canvas.Children.Add(propertyPanel);
         dock = new WidgetDock(catalog, session.CanEdit, AddWidget, visible =>
         {
@@ -176,7 +156,7 @@ internal sealed class WidgetEditorWindow : W.Window
             CaptureContinuedGesture();
             ContinueHold();
         };
-        Deactivated += (_, _) => CancelInteraction();
+        Deactivated += (_, _) => CancelGesture();
         PreviewKeyDown += OnKey;
         canvas.PreviewMouseMove += (_, e) =>
         {
@@ -194,7 +174,7 @@ internal sealed class WidgetEditorWindow : W.Window
         {
             mouseInput?.Dispose();
             closed = true;
-            CancelInteraction();
+            CancelGesture();
             iconTimer.Stop();
         };
         iconTimer.Tick += async (_, _) => await RefreshIconsAsync();
@@ -208,8 +188,21 @@ internal sealed class WidgetEditorWindow : W.Window
     {
         bool displayChanged = layout?.Display != next.Display;
         if (layout == next) return;
-        if (displayChanged) CancelInteraction();
+        if (displayChanged) CancelGesture();
         layout = next;
+        if (!ReferenceEquals(appliedBackdrop, next.Backdrop))
+        {
+            appliedBackdrop = next.Backdrop;
+            if (next.Backdrop is { } backdrop)
+            {
+                var bitmap = Imaging.BitmapSource.Create(backdrop.Width, backdrop.Height, 96, 96, Media.PixelFormats.Bgra32,
+                    null, backdrop.Pixels, backdrop.Width * 4);
+                bitmap.Freeze();
+                propertyBackdrop = new Media.ImageBrush(bitmap) { Stretch = Media.Stretch.Fill };
+            }
+            else propertyBackdrop = null;
+            propertyPanel.Background = propertyBackdrop ?? Surface;
+        }
         if (next.IconView != iconOwner)
         {
             iconOwner = next.IconView;
@@ -268,10 +261,15 @@ internal sealed class WidgetEditorWindow : W.Window
         }
         if (propertyPanel.Visibility == W.Visibility.Visible)
         {
-            // Keep the slider under the pointer when its preview changes the card's dimensions.
-            if (propertyDrag is null || propertyBounds.IsEmpty)
-                propertyBounds = PlacePropertyPanel(card, work, removeBounds);
-            overlays.Add(ToScreen(propertyBounds));
+            var panel = ToScreen(PlacePropertyPanel(card, work, removeBounds));
+            overlays.Add(panel);
+            if (propertyBackdrop is not null)
+            {
+                var display = value.Display;
+                propertyBackdrop.Viewbox = new((panel.Left - display.Left) / (double)display.Width,
+                    (panel.Top - display.Top) / (double)display.Height,
+                    panel.Width / (double)display.Width, panel.Height / (double)display.Height);
+            }
         }
 
         ShowGuide(guideX, snapX, work, true);
@@ -304,15 +302,20 @@ internal sealed class WidgetEditorWindow : W.Window
 
     private W.Rect PlacePropertyPanel(W.Rect card, W.Rect work, W.Rect removeBounds)
     {
-        const double gap = 12;
-        propertyPanel.Width = Math.Min(264, Math.Max(0, work.Width - gap * 2));
-        propertyPanel.Measure(new W.Size(double.PositiveInfinity, double.PositiveInfinity));
+        const double gap = 12, minimumWidth = 220;
+        double width = card.IsEmpty ? 264 : Math.Max(minimumWidth, card.Width);
+        double left = work.Left + gap, screenRight = Math.Max(left, work.Right - gap);
+        width = Math.Min(width, screenRight - left);
+        propertyPanel.Width = width;
+        inspector?.Fit(width - propertyPanel.Padding.Left - propertyPanel.Padding.Right -
+            propertyPanel.BorderThickness.Left - propertyPanel.BorderThickness.Right);
+        propertyPanel.Measure(new W.Size(width, double.PositiveInfinity));
         var size = propertyPanel.DesiredSize;
-        double right = dock.Bounds.Left - gap;
-        if (right - work.Left < size.Width + gap * 2) right = work.Right;
-        double minX = work.Left + gap, maxX = Math.Max(minX, right - size.Width - gap);
         double center = card.IsEmpty ? work.Left + work.Width / 2 : card.Left + card.Width / 2;
-        double x = Math.Clamp(center - size.Width / 2, minX, maxX);
+        double right = dock.Bounds.Left - gap;
+        if (right - left < size.Width) right = screenRight;
+        double maxX = Math.Max(left, right - size.Width);
+        double x = Math.Clamp(center - size.Width / 2, left, maxX);
         double y = card.IsEmpty ? work.Top + gap : card.Bottom + gap;
         if (!card.IsEmpty && y + size.Height > work.Bottom - gap)
         {
@@ -322,10 +325,13 @@ internal sealed class WidgetEditorWindow : W.Window
             {
                 x = card.Right + gap;
                 if (x > maxX) x = card.Left - size.Width - gap;
-                x = Math.Clamp(x, minX, maxX);
+                x = Math.Clamp(x, left, maxX);
                 y = Math.Clamp(card.Top, work.Top + gap, Math.Max(work.Top + gap, work.Bottom - size.Height - gap));
             }
         }
+        if (!dock.Bounds.IsEmpty && (y >= dock.Bounds.Bottom + gap || y + size.Height <= dock.Bounds.Top - gap))
+            x = Math.Clamp(center - size.Width / 2, left, Math.Max(left, screenRight - size.Width));
+        y = Math.Clamp(y, work.Top + gap, Math.Max(work.Top + gap, work.Bottom - size.Height - gap));
         Controls.Canvas.SetLeft(propertyPanel, x);
         Controls.Canvas.SetTop(propertyPanel, y);
         return new(new W.Point(x, y), size);
@@ -516,28 +522,6 @@ internal sealed class WidgetEditorWindow : W.Window
         Preview(active.Before);
     }
 
-    private void FinishPropertyDrag(bool canceled)
-    {
-        if (propertyDrag is not { } drag) return;
-        propertyDrag = null;
-        if (canceled)
-        {
-            Preview(drag.Before);
-            LayoutParts();
-        }
-        else Commit(drag.Before, State);
-    }
-
-    private void CancelInteraction()
-    {
-        if (propertyDrag is { } drag)
-        {
-            FinishPropertyDrag(canceled: true);
-            drag.Thumb.CancelDrag();
-        }
-        CancelGesture();
-    }
-
     private void ReleaseGesture()
     {
         gesture = null;
@@ -561,7 +545,7 @@ internal sealed class WidgetEditorWindow : W.Window
         switch (e.Key)
         {
             case Input.Key.Escape:
-                if (IsInteracting) CancelInteraction();
+                if (IsInteracting) CancelGesture();
                 else Close();
                 break;
             case Input.Key.Delete when !IsInteracting:
@@ -578,7 +562,7 @@ internal sealed class WidgetEditorWindow : W.Window
                 if (!IsInteracting) Edit(session.Redo);
                 break;
             case Input.Key.Left or Input.Key.Right or Input.Key.Up or Input.Key.Down
-                when !IsInteracting && Input.Keyboard.FocusedElement is not (Controls.Slider or Controls.RadioButton) &&
+                when !IsInteracting && Input.Keyboard.FocusedElement is not Controls.RadioButton &&
                     session.Selected is { } item && layout is { } value &&
                     LayoutFor(State.Selected) is { } card && modifiers is Input.ModifierKeys.None or Input.ModifierKeys.Shift:
                 int step = modifiers == Input.ModifierKeys.Shift ? 10 : 1;
@@ -601,21 +585,12 @@ internal sealed class WidgetEditorWindow : W.Window
             (float)Math.Clamp(y - display.Top, halfY, display.Height - halfY) / display.Height);
     }
 
-    private void SetVisibility(WidgetVisibility visibility)
-    {
-        if (!updatingProperties) ChangeProperty(session.WithVisibility(visibility));
-    }
+    private void SetVisibility(WidgetVisibility visibility) => Commit(State, session.WithVisibility(visibility));
 
     private void ApplyOptions(WidgetOptions options)
     {
         if (session.Selected is not { } item || catalog.Find(item.Type) is not { } definition) return;
-        ChangeProperty(session.WithOptions(definition.NormalizeOptions(options)));
-    }
-
-    private void ChangeProperty(WidgetEditSnapshot next)
-    {
-        if (propertyDrag is not null) Preview(next);
-        else Commit(State, next);
+        Commit(State, session.WithOptions(definition.NormalizeOptions(options)));
     }
 
     private void AddWidget(WidgetDefinition definition)
@@ -686,18 +661,10 @@ internal sealed class WidgetEditorWindow : W.Window
         if (selected?.Type != inspectorType)
         {
             inspectorType = selected?.Type;
-            inspector = inspectorType is null ? null : WidgetInspectors.Create(inspectorType, ApplyOptions);
+            inspector = inspectorType is null ? null : WidgetInspectors.Create(inspectorType, ApplyOptions, SetVisibility);
             inspectorHost.Content = inspector?.View;
         }
-        if (selected is null) return;
-        updatingProperties = true;
-        try
-        {
-            scale.Value = selected.Placement.Scale * 100;
-            idleOnly.IsChecked = selected.Visibility == WidgetVisibility.Idle;
-            inspector?.Display(selected.Options);
-        }
-        finally { updatingProperties = false; }
+        if (selected is not null) inspector?.Display(selected);
     }
 
     private Media.Matrix DeviceToDip => W.PresentationSource.FromVisual(canvas)?.CompositionTarget?.TransformFromDevice ?? Media.Matrix.Identity;

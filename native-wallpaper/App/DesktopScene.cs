@@ -30,6 +30,7 @@ internal static class DesktopScene
         var cards = new List<GlassCard>();
         WidgetLayout[] layouts = [];
         WidgetEditorLayout? lastLayout = null;
+        WidgetEditorBackdrop? editorBackdrop = null;
         WidgetDocument widgets = initialWidgets;
         DesktopTarget? desktop = null;
         D3D11Renderer? renderer = null;
@@ -54,6 +55,7 @@ internal static class DesktopScene
             editing = enabled;
             showDockPreviews = enabled;
             if (enabled) dockPreviews.Invalidate();
+            editorBackdrop = null;
             lastLayout = null;
             dirty = true;
             return widgets;
@@ -81,6 +83,9 @@ internal static class DesktopScene
             wallpaper.Apply(next, clock.Elapsed.TotalSeconds, scale => renderer?.ChangeRenderScale(scale),
                 image => renderer?.ChangeBackground(image));
             var currentStyle = wallpaper.Style;
+            if (!ReferenceEquals(previousBackground, wallpaper.Background) || previousScale != next.RenderScale ||
+                previousStyle.Background != currentStyle.Background)
+                editorBackdrop = null;
             if (!ReferenceEquals(previousBackground, wallpaper.Background) || previousScale != next.RenderScale ||
                 previousStyle.Background != currentStyle.Background || previousStyle.Glass != currentStyle.Glass ||
                 previousStyle.Lyrics.BehindGlass != currentStyle.Lyrics.BehindGlass)
@@ -110,6 +115,7 @@ internal static class DesktopScene
                 if (wallpaper.Rotate(now, image => renderer?.ChangeBackground(image)))
                 {
                     dockPreviews.Invalidate();
+                    editorBackdrop = null;
                     dirty = true;
                 }
 
@@ -143,6 +149,7 @@ internal static class DesktopScene
                                 target.Layer.Raised, wallpaper.Appearance.RenderScale);
                             text.Attach(renderer);
                             dockPreviews.Invalidate();
+                            editorBackdrop = null;
                             host.Reveal(target);
                             report.Width = client.Width;
                             report.Height = client.Height;
@@ -241,9 +248,13 @@ internal static class DesktopScene
                     if (widgetAnimation) wake = Math.Min(wake, now < nextFrame ? nextFrame : now + 1.0 / 60);
                     if (editing)
                     {
-                        var placement = new WidgetEditorLayout(surface.Display, surface.WorkArea, layouts, surface.Layer.Icons, attached.Handle);
+                        if (layouts.Length != 0 && updateEditor is not null && editorBackdrop is null)
+                            editorBackdrop = renderer.DrawEditorBackdrop(wallpaper.Style.Background);
+                        var placement = new WidgetEditorLayout(surface.Display, surface.WorkArea, layouts, surface.Layer.Icons,
+                            attached.Handle, editorBackdrop);
                         if (lastLayout is not { } previous || previous.Display != placement.Display || previous.WorkArea != placement.WorkArea ||
                             previous.IconView != placement.IconView || previous.WallpaperView != placement.WallpaperView ||
+                            previous.Backdrop != placement.Backdrop ||
                             !layouts.AsSpan().SequenceEqual(previous.Items))
                         {
                             lastLayout = placement;

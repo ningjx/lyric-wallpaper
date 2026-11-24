@@ -75,6 +75,25 @@ float4 PreviewBackgroundPixel(Vertex v) : SV_Target
     return float4(SampleBackground(PreviewWindow.xy + v.position.xy * PreviewWindow.zw), 1);
 }
 
+float4 EditorBackdropPixel(Vertex v) : SV_Target
+{
+    static const float weights[5] = { 1, 4, 6, 4, 1 };
+    float2 pixel = v.position.xy * PreviewWindow.zw;
+    float spacing = View.y * .011;
+    float3 color = 0;
+    [unroll] for (int row = 0; row < 5; row++)
+    {
+        [unroll] for (int column = 0; column < 5; column++)
+        {
+            float2 samplePixel = clamp(pixel + float2(column - 2, row - 2) * spacing, 0.5, View.xy - 0.5);
+            color += SampleBackground(samplePixel) * weights[column] * weights[row];
+        }
+    }
+    color /= 256;
+    float luminance = dot(color, float3(.2126, .7152, .0722));
+    return float4(lerp(lerp(luminance, color, .68), float3(.98, .985, 1), .79), 1);
+}
+
 float4 BlurDownsample(Vertex v) : SV_Target
 {
     int grid = (int)BlurParameters.z;

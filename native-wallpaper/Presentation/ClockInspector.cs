@@ -1,5 +1,6 @@
 using W = System.Windows;
 using Controls = System.Windows.Controls;
+using Primitives = System.Windows.Controls.Primitives;
 using Media = System.Windows.Media;
 using Fluent = Wpf.Ui.Controls;
 using LyricWallpaper.Widgets;
@@ -10,51 +11,58 @@ namespace LyricWallpaper.Presentation;
 internal interface IWidgetInspector
 {
     W.FrameworkElement View { get; }
-    void Display(WidgetOptions options);
+    void Fit(double width);
+    void Display(WidgetInstance widget);
 }
 
 internal static class WidgetInspectors
 {
-    public static IWidgetInspector? Create(string type, Action<WidgetOptions> change) =>
-        type == ClockDefinition.TypeId ? new ClockInspector(change) : null;
+    public static IWidgetInspector? Create(string type, Action<WidgetOptions> change, Action<WidgetVisibility> setVisibility) =>
+        type == ClockDefinition.TypeId ? new ClockInspector(change, setVisibility) : null;
 }
 
 internal sealed class ClockInspector : IWidgetInspector
 {
-    private readonly Controls.StackPanel panel = new();
-    private readonly Controls.Slider padding;
+    private readonly Controls.Grid panel = new();
+    private readonly Primitives.UniformGrid flags = new();
+    private readonly Controls.ColumnDefinition colorColumn = new();
     private readonly Fluent.ToggleSwitch format = WidgetPropertyControls.Toggle("24 小时制");
     private readonly Fluent.ToggleSwitch date = WidgetPropertyControls.Toggle("显示日期");
     private readonly Fluent.ToggleSwitch autoInvert = WidgetPropertyControls.Toggle("文字自动反色");
-    private readonly Controls.WrapPanel palette = new() { MinHeight = 28, Margin = new W.Thickness(0, 3, 0, 0) };
+    private readonly Fluent.ToggleSwitch idleOnly = WidgetPropertyControls.Toggle("仅闲时显示");
+    private readonly Controls.StackPanel palette = new() { VerticalAlignment = W.VerticalAlignment.Center };
+    private readonly Controls.TextBlock colorLabel = WidgetPropertyControls.Label("文字颜色");
+    private readonly Controls.WrapPanel swatches = new();
     private readonly Dictionary<int, Controls.RadioButton> colors = new();
     private ClockOptions options = new();
     private bool updating;
+    private (int Columns, bool SideBySide, bool ColorsInline)? currentLayout;
     public W.FrameworkElement View => panel;
 
-    public ClockInspector(Action<WidgetOptions> change)
+    public ClockInspector(Action<WidgetOptions> change, Action<WidgetVisibility> setVisibility)
     {
-        panel.Children.Add(WidgetPropertyControls.Range("内边距", 0, 64, "{0:0}", out padding));
-        padding.ValueChanged += (_, e) => Set(options with { Padding = (int)Math.Round(e.NewValue) });
-
-        var flags = new Controls.WrapPanel();
-        format.Margin = new W.Thickness(0, 0, 14, 0);
         format.Checked += (_, _) => Set(options with { Use24Hour = true });
         format.Unchecked += (_, _) => Set(options with { Use24Hour = false });
         date.Checked += (_, _) => Set(options with { ShowDate = true });
         date.Unchecked += (_, _) => Set(options with { ShowDate = false });
-        flags.Children.Add(format);
-        flags.Children.Add(date);
-        panel.Children.Add(flags);
-
         autoInvert.ToolTip = "亮背景用黑字，暗背景用白字。关闭后恢复手选颜色。";
         autoInvert.Checked += (_, _) => Set(options with { AutoInvertText = true });
         autoInvert.Unchecked += (_, _) => Set(options with { AutoInvertText = false });
-        panel.Children.Add(autoInvert);
+        idleOnly.Checked += (_, _) => { if (!updating) setVisibility(WidgetVisibility.Idle); };
+        idleOnly.Unchecked += (_, _) => { if (!updating) setVisibility(WidgetVisibility.Always); };
 
-        var label = WidgetPropertyControls.Label("文字颜色");
-        label.Width = 66;
-        palette.Children.Add(label);
+        flags.Children.Add(format);
+        flags.Children.Add(date);
+        flags.Children.Add(autoInvert);
+        flags.Children.Add(idleOnly);
+        panel.RowDefinitions.Add(new() { Height = W.GridLength.Auto });
+        panel.RowDefinitions.Add(new() { Height = W.GridLength.Auto });
+        panel.ColumnDefinitions.Add(new());
+        panel.ColumnDefinitions.Add(colorColumn);
+        panel.Children.Add(flags);
+
+        palette.Children.Add(colorLabel);
+        palette.Children.Add(swatches);
         foreach (var (name, argb) in new (string, uint)[]
         {
             ("冰白", 0xFFF0FBFF), ("金黄", 0xFFFFD797), ("薄荷", 0xFFA9F3DD), ("浅蓝", 0xFFBADAFF), ("墨灰", 0xFF20252D)
@@ -70,9 +78,10 @@ internal sealed class ClockInspector : IWidgetInspector
             W.Automation.AutomationProperties.SetName(swatch, name);
             swatch.Checked += (_, _) => Set(options with { TextColor = color });
             colors.Add(color, swatch);
-            palette.Children.Add(swatch);
+            swatches.Children.Add(swatch);
         }
         panel.Children.Add(palette);
+        Fit(0);
 
         void Set(ClockOptions next)
         {
@@ -80,17 +89,33 @@ internal sealed class ClockInspector : IWidgetInspector
         }
     }
 
-    public void Display(WidgetOptions widget)
+    public void Fit(double width)
     {
-        options = (ClockOptions)widget;
+        bool sideBySide = width >= 420;
+        bool colorsInline = !sideBySide && width >= 206;
+        int columns = width >= 248 ? 2 : 1;
+        if (currentLayout == (columns, sideBySide, colorsInline)) return;
+        currentLayout = (columns, sideBySide, colorsInline);
+        flags.Columns = columns;
+        colorColumn.Width = new W.GridLength(sideBySide ? 160 : 0);
+        Controls.Grid.SetColumn(palette, sideBySide ? 1 : 0);
+        Controls.Grid.SetRow(palette, sideBySide ? 0 : 1);
+        palette.Margin = sideBySide ? new W.Thickness(14, 0, 0, 0) : new W.Thickness(0, 4, 0, 0);
+        palette.Orientation = colorsInline ? Controls.Orientation.Horizontal : Controls.Orientation.Vertical;
+        colorLabel.Margin = colorsInline ? new W.Thickness(0, 0, 10, 0) : new W.Thickness(0, 0, 0, 4);
+    }
+
+    public void Display(WidgetInstance widget)
+    {
+        options = (ClockOptions)widget.Options;
         updating = true;
         try
         {
-            padding.Value = options.Padding;
             format.IsChecked = options.Use24Hour;
             date.IsChecked = options.ShowDate;
             autoInvert.IsChecked = options.AutoInvertText;
-            palette.IsEnabled = !options.AutoInvertText;
+            idleOnly.IsChecked = widget.Visibility == WidgetVisibility.Idle;
+            swatches.IsEnabled = !options.AutoInvertText;
             foreach (var (color, swatch) in colors)
                 swatch.IsChecked = color == options.TextColor;
         }

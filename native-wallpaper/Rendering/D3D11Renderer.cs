@@ -26,7 +26,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
     private nint device, context, chain, target, constants, blurConstants, sampler, background, lyrics, atlasTexture;
     private nint backgroundVs, backgroundPs, cardVs, cardPs, blurDownsamplePs, blurHorizontalPs, blurVerticalPs;
     private nint widgetVs, widgetPs, widgetBlend;
-    private nint previewBackgroundPs, previewWidgetPs, previewTexture, previewTarget, previewStaging;
+    private nint previewBackgroundPs, previewWidgetPs, editorBackdropPs, previewTexture, previewTarget, previewStaging;
     private (nint Target, nint Input) blurHorizontal, blurResult;
     private (Size Size, bool Mipmapped) blurSurface;
     private readonly record struct BlurKey(BackgroundView View, int GaussianRadius);
@@ -231,14 +231,24 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         return new(type, PreviewWidth, PreviewHeight, ReadPreviewPixels());
     }
 
-    private bool PrepareScene(Span<Vector4> scene, SceneStyle style, IReadOnlyList<GlassCard> lyricsCards, bool hasWidgets)
+    public WidgetEditorBackdrop DrawEditorBackdrop(BackgroundView view)
     {
-        var view = style.Background;
-        var material = style.Glass;
-        var lyricsStyle = style.Lyrics;
-        float imageAspect = (float)backgroundWidth / backgroundHeight;
-        float screenAspect = (float)Width / Height;
-        float ratio = screenAspect / imageAspect;
+        EnsurePreviewResources();
+        Span<Vector4> scene = stackalloc Vector4[SceneVectors];
+        PackBackground(scene, view);
+        scene[61] = new(0, 0, Width / (float)PreviewWidth, Height / (float)PreviewHeight);
+        WriteConstants(scene);
+
+        SetTarget(previewTarget);
+        SetViewport(PreviewWidth, PreviewHeight);
+        DrawBackground(editorBackdropPs);
+        SetTarget(0);
+        return new(PreviewWidth, PreviewHeight, ReadPreviewPixels());
+    }
+
+    private void PackBackground(Span<Vector4> scene, BackgroundView view)
+    {
+        float ratio = (Width / (float)Height) / (backgroundWidth / (float)backgroundHeight);
         scene[0] = view.Layout switch
         {
             BackgroundLayout.Contain => new(Width, Height, Math.Max(1, ratio), Math.Max(1, 1 / ratio)),
@@ -246,8 +256,16 @@ internal sealed unsafe class D3D11Renderer : IDisposable
             BackgroundLayout.Tile => new(Width, Height, (float)OutputWidth / backgroundWidth, (float)OutputHeight / backgroundHeight),
             _ => new(Width, Height, Math.Min(1, ratio), Math.Min(1, 1 / ratio))
         };
-        scene[33] = PackColor(lyricsStyle.TextColor, material.Strength);
         scene[34] = new(view.Zoom / 100f, view.X / 100f, view.Y / 100f, view.Layout == BackgroundLayout.Tile ? 1 : 0);
+    }
+
+    private bool PrepareScene(Span<Vector4> scene, SceneStyle style, IReadOnlyList<GlassCard> lyricsCards, bool hasWidgets)
+    {
+        var view = style.Background;
+        var material = style.Glass;
+        var lyricsStyle = style.Lyrics;
+        PackBackground(scene, view);
+        scene[33] = PackColor(lyricsStyle.TextColor, material.Strength);
         scene[35] = new(material.RefractionHeight, material.RefractionAmount, material.Blur, material.Radius);
         scene[36] = new(material.Tone.Saturation, material.Tone.Brightness, material.Tone.Contrast, (int)material.Tone.Dispersion);
         scene[37] = PackColor(material.Highlight.Color);
@@ -319,6 +337,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
             var shader = ReadShaderSource();
             previewBackgroundPs = CreateShader(shader, "PreviewBackgroundPixel", "ps_5_0", Device.CreatePixelShader);
             previewWidgetPs = CreateShader(shader, "PreviewWidgetPixel", "ps_5_0", Device.CreatePixelShader);
+            editorBackdropPs = CreateShader(shader, "EditorBackdropPixel", "ps_5_0", Device.CreatePixelShader);
             var description = new TextureDescription
             {
                 Width = PreviewWidth, Height = PreviewHeight, MipLevels = 1, ArraySize = 1,
@@ -344,7 +363,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
             (context, previewStaging, previewTexture);
         Subresource mapped;
         Check(((delegate* unmanaged[Stdcall]<nint, nint, uint, uint, uint, Subresource*, int>)Slot(context, (int)Context.Map))
-            (context, previewStaging, 0, 1, 0, &mapped), "read widget preview");
+            (context, previewStaging, 0, 1, 0, &mapped), "read editor preview");
         try
         {
             const int stride = PreviewWidth * 4;
@@ -361,9 +380,9 @@ internal sealed unsafe class D3D11Renderer : IDisposable
 
     private void ReleasePreviewResources()
     {
-        foreach (nint resource in new[] { previewBackgroundPs, previewWidgetPs, previewTarget, previewTexture, previewStaging })
+        foreach (nint resource in new[] { previewBackgroundPs, previewWidgetPs, editorBackdropPs, previewTarget, previewTexture, previewStaging })
             if (resource != 0) Marshal.Release(resource);
-        previewBackgroundPs = previewWidgetPs = previewTarget = previewTexture = previewStaging = 0;
+        previewBackgroundPs = previewWidgetPs = editorBackdropPs = previewTarget = previewTexture = previewStaging = 0;
     }
 
     private static void PackCard(Span<Vector4> constants, int index, GlassCard card)
