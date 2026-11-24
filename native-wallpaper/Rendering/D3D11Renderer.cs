@@ -31,7 +31,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
     private readonly record struct BlurKey(BackgroundView View, int GaussianRadius);
     private BlurKey? cachedBlur;
     private int backgroundWidth, backgroundHeight;
-    public const int SceneVectors = 62;
+    public const int SceneVectors = 65;
     public int OutputWidth { get; }
     public int OutputHeight { get; }
     public int Width { get; private set; }
@@ -245,8 +245,8 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         };
         scene[33] = PackColor(lyricsStyle.TextColor, material.Strength);
         scene[34] = new(view.Zoom / 100f, view.X / 100f, view.Y / 100f, view.Layout == BackgroundLayout.Tile ? 1 : 0);
-        scene[35] = new(material.RefractionHeight, -material.RefractionAmount, material.Blur, material.Radius);
-        scene[36] = new(material.Tone.Saturation, material.Tone.Brightness, material.Tone.Contrast, material.Tone.Chromatic ? 1 : 0);
+        scene[35] = new(material.RefractionHeight, material.RefractionAmount, material.Blur, material.Radius);
+        scene[36] = new(material.Tone.Saturation, material.Tone.Brightness, material.Tone.Contrast, (int)material.Tone.Dispersion);
         scene[37] = PackColor(material.Highlight.Color);
         scene[38] = new(material.Highlight.Angle, material.Highlight.Falloff, material.Highlight.Width, (int)material.Highlight.Style);
         scene[39] = PackColor(material.Tint);
@@ -254,8 +254,11 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         scene[41] = PackColor(material.Shadow.Color);
         scene[42] = new(material.Shadow.Radius, material.Shadow.X, material.Shadow.Y, lyricsStyle.BehindGlass ? 1 : 0);
         scene[43] = new(lyricsStyle.FarGlass, lyricsStyle.Depth ? 1 : 0, lyricsCards.Count == 0 ? 0 : lyricsCards[0].Padding, 0);
+        scene[62] = new(material.OpticalDepth ? 1 : 0, material.ContinuousCorners ? 1 : 0, 0, 0);
+        scene[63] = new(material.InnerShadow.Alpha, material.InnerShadow.Radius, material.InnerShadow.X, material.InnerShadow.Y);
+        scene[64] = new(material.ProgressiveBlur ? 1 : 0, material.HueTint ? 1 : 0, lyricsStyle.AdaptiveContrast ? 1 : 0, 0);
         for (int i = 0; i < lyricsCards.Count; i++) PackCard(scene, i, lyricsCards[i]);
-        bool blurEnabled = material.Blur > 0 && !lyricsStyle.BehindGlass && material.Strength > 0;
+        bool blurEnabled = material.Blur > 0 && material.Strength > 0 && (!lyricsStyle.BehindGlass || material.ProgressiveBlur);
         bool sampleBlur = blurEnabled && (lyricsCards.Count != 0 || hasWidgets);
         float blurRadius = material.Blur * Height / 1080f;
         int downsampleGrid = 2;

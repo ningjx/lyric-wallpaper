@@ -11,7 +11,7 @@ cbuffer Scene : register(b0)
     float4 Appearance;         // lyric color and glass intensity
     float4 BackgroundTransform; // zoom, XY offset, tile
     float4 Optics;             // height, displacement, blur, corner radius
-    float4 Tone;               // saturation, brightness, contrast, RGB separation
+    float4 Tone;               // saturation, brightness, contrast, dispersion mode
     float4 HighlightColor;
     float4 HighlightShape;     // angle, falloff, edge width, mode
     float4 Tint;
@@ -22,6 +22,9 @@ cbuffer Scene : register(b0)
     float4 BlurPass;           // downsampled target dimensions, mip level, mode (off, Gaussian, mip)
     float4 GlyphUv[16];        // atlas origin and extent of the visible glyphs
     float4 PreviewWindow;      // scene origin and scene pixels per preview pixel
+    float4 LensShape;
+    float4 InnerShadow;
+    float4 MaterialOptions;
 };
 
 cbuffer BlurKernel : register(b1)
@@ -48,7 +51,7 @@ float3 SampleBackground(float2 pixel)
     if (BackgroundTransform.w > 0) uv = frac(uv);
     return any(uv < 0) || any(uv > 1)
         ? float3(0.035, 0.055, 0.075)
-        : Background.Sample(LinearClamp, uv).rgb;
+        : Background.SampleLevel(LinearClamp, uv, 0).rgb;
 }
 
 Vertex BackgroundVertex(uint id : SV_VertexID)
@@ -117,23 +120,86 @@ Vertex CardVertex(uint id : SV_VertexID, uint instance : SV_InstanceID)
     return v;
 }
 
-float SignedDistance(float2 p, float2 halfSize, float radius)
+float ShapeDistance(float2 p, float2 halfSize, float radius, bool continuous, out float2 normal)
 {
-    float2 q = abs(p) - (halfSize - radius);
-    return length(max(q, 0)) + min(max(q.x, q.y), 0) - radius;
+    float extent = continuous ? min(radius * 1.4, min(halfSize.x, halfSize.y)) : radius;
+    float2 q = abs(p) - (halfSize - extent);
+    if (min(q.x, q.y) <= 0)
+    {
+        normal = sign(p) * (q.x > q.y ? float2(1, 0) : float2(0, 1));
+        return max(q.x, q.y) - extent;
+    }
+    if (!continuous || extent <= 0)
+    {
+        float distance = length(q);
+        normal = sign(p) * q / max(distance, 1e-5);
+        return distance - extent;
+    }
+
+    float axis = max(q.x, q.y);
+    float2 corner = q / axis;
+    float2 square = corner * corner;
+    float norm = pow(dot(square, corner), 1.0 / 3.0);
+    float gradientLength = length(square);
+    normal = sign(p) * square / gradientLength;
+    return (axis * norm - extent) * norm * norm / gradientLength;
 }
 
-float3 SampleGlassBackground(float2 pixel, float radius)
+float2 LensDisplacement(float2 local, float2 normal, float rim, float amount)
 {
-    if (BlurPass.w == 0) return SampleBackground(pixel);
+    if (rim <= 0 || amount == 0) return 0;
+    if (LensShape.x > 0)
+    {
+        float2 radial = local * rsqrt(max(dot(local, local), 1e-8));
+        float2 direction = normal + radial;
+        normal = direction * rsqrt(max(dot(direction, direction), 1e-8));
+    }
+    return normal * amount * (1 - sqrt(saturate(1 - rim * rim)));
+}
+
+float3 ApplyRimHighlight(float3 glass, float distance, float2 normal, float scale, float strength)
+{
+    float opacity = HighlightColor.a * strength;
+    float width = HighlightShape.z * scale;
+    float softness = max(0.5, width * 0.5);
+    if (opacity <= 0 || distance <= -width - softness) return glass;
+
+    float band = 1 - smoothstep(max(0.0, width - softness), width + softness, -distance);
+    float direction = dot(normal, float2(cos(HighlightShape.x), sin(HighlightShape.x)));
+    float intensity = HighlightShape.w == 2 ? 1 : pow(saturate(abs(direction)), HighlightShape.y);
+    float alpha = saturate(opacity * band * intensity);
+    if (HighlightShape.w == 1)
+        return lerp(glass, HighlightColor.rgb * step(0, direction), alpha * 0.38);
+    return saturate(glass + HighlightColor.rgb * alpha);
+}
+
+float InnerShadowMask(float2 local, float2 halfSize, float radius, bool continuous, float distance, float scale)
+{
+    float softness = max(0.5, InnerShadow.y * scale * 1.5);
+    float2 offset = InnerShadow.zw * scale;
+    if (InnerShadow.x <= 0 || !any(offset) || distance < -softness - length(offset)) return 0;
+
+    float2 unused;
+    float shifted = ShapeDistance(local - offset, halfSize, radius, continuous, unused);
+    return saturate(smoothstep(-softness, softness, shifted) - smoothstep(-softness, softness, distance));
+}
+
+float3 SampleGlassBackground(float2 pixel, float radius, float blurWeight)
+{
+    if (blurWeight <= 0) return SampleBackground(pixel);
 
     float2 uv = pixel / View.xy;
-    if (BlurPass.w == 1) return BlurTexture.Sample(LinearClamp, uv).rgb;
+    if (BlurPass.w == 1)
+    {
+        float3 blurred = BlurTexture.SampleLevel(LinearClamp, uv, 0).rgb;
+        return blurWeight >= 1 ? blurred : lerp(SampleBackground(pixel), blurred, blurWeight);
+    }
 
+    radius *= blurWeight;
     // Read overlapping, prefiltered regions along a rotated square to soften the mip texel grid.
     float2 first = float2(.27, .13) * radius / View.xy;
     float2 second = float2(-.13, .27) * radius / View.xy;
-    float level = BlurPass.z;
+    float level = blurWeight >= 1 ? BlurPass.z : max(0, BlurPass.z + log2(blurWeight));
     float3 color = .25 * (BlurTexture.SampleLevel(LinearClamp, uv - first, level).rgb +
                           BlurTexture.SampleLevel(LinearClamp, uv + first, level).rgb +
                           BlurTexture.SampleLevel(LinearClamp, uv - second, level).rgb +
@@ -142,17 +208,88 @@ float3 SampleGlassBackground(float2 pixel, float radius)
     return radius < 2 ? lerp(SampleBackground(pixel), color, radius * .5) : color;
 }
 
-float3 SampleGlass(float2 pixel, float2 displacement, float scale)
+float3 SampleGlass(float2 pixel, float2 displacement, float2 location, float radius, float blurWeight)
 {
-    float radius = Optics.z * scale;
-    float3 color = SampleGlassBackground(pixel, radius);
-    if (Tone.w > 0 && Appearance.w > 0)
+    float3 center = SampleGlassBackground(pixel, radius, blurWeight);
+    [branch] if (Tone.w == 2)
+    {
+        float2 spread = displacement * (location.x * location.y);
+        [branch] if (dot(spread, spread) > .0025)
+        {
+            float  red    = SampleGlassBackground(pixel + spread, radius, blurWeight).r;
+            float2 orange = SampleGlassBackground(pixel + spread * (2.0 / 3.0), radius, blurWeight).rg;
+            float2 yellow = SampleGlassBackground(pixel + spread / 3.0, radius, blurWeight).rg;
+            float2 cyan   = SampleGlassBackground(pixel - spread / 3.0, radius, blurWeight).gb;
+            float  blue   = SampleGlassBackground(pixel - spread * (2.0 / 3.0), radius, blurWeight).b;
+            float2 purple = SampleGlassBackground(pixel - spread, radius, blurWeight).rb;
+            return float3((2 * (red + orange.r + yellow.r) + purple.x) / 7.0,
+                          (orange.g + 2 * (yellow.g + center.g + cyan.x)) / 7.0,
+                          (cyan.y + blue + purple.y) / 3.0);
+        }
+    }
+    else if (Tone.w == 1 && any(displacement))
     {
         float2 shift = displacement * 0.055;
-        color.r = SampleGlassBackground(pixel - shift, radius).r;
-        color.b = SampleGlassBackground(pixel + shift, radius).b;
+        center.r = SampleGlassBackground(pixel - shift, radius, blurWeight).r;
+        center.b = SampleGlassBackground(pixel + shift, radius, blurWeight).b;
     }
-    return color;
+    return center;
+}
+
+float3 ApplyTint(float3 color, float strength)
+{
+    float alpha = saturate(Tint.a * strength);
+    if (alpha <= 0) return color;
+    if (MaterialOptions.y <= 0) return lerp(color, Tint.rgb, alpha);
+
+    float tintMin = min(Tint.r, min(Tint.g, Tint.b));
+    float tintRange = max(Tint.r, max(Tint.g, Tint.b)) - tintMin;
+    if (tintRange > 1e-5)
+    {
+        float low = min(color.r, min(color.g, color.b));
+        float range = max(color.r, max(color.g, color.b)) - low;
+        float3 hue = (Tint.rgb - tintMin) / tintRange;
+        color = lerp(color, low + hue * range, alpha);
+    }
+    return lerp(color, Tint.rgb, 0.75 * alpha);
+}
+
+float RelativeLuminance(float3 color)
+{
+    float3 linearRgb = color * (color * (color * .305306011 + .682171111) + .012522878);
+    return dot(linearRgb, float3(.2126, .7152, .0722));
+}
+
+float GlyphMask(float2 coord, float4 bounds)
+{
+    if (any(coord < 0) || any(coord > 1)) return 0;
+    return Lyrics.SampleLevel(LinearClamp, bounds.xy + coord * bounds.zw, 0);
+}
+
+float3 CompositeText(float3 glass, float2 glyph, float4 bounds, float3 text, float scale)
+{
+    float2 stroke = max(0.8, 1.5 * scale) / text.xy;
+    if (any(glyph < -stroke) || any(glyph > 1 + stroke)) return glass;
+
+    float mask = GlyphMask(glyph, bounds);
+    [branch] if (MaterialOptions.z > 0 && mask < .95 && text.z > 0)
+    {
+        float ink = RelativeLuminance(Appearance.rgb);
+        float backdrop = RelativeLuminance(glass);
+        float contrast = (max(ink, backdrop) + .05) / (min(ink, backdrop) + .05);
+        float need = 1 - smoothstep(1.4, 4.5, contrast);
+        [branch] if (need > 0)
+        {
+            float horizontal = max(GlyphMask(glyph - float2(stroke.x, 0), bounds),
+                                   GlyphMask(glyph + float2(stroke.x, 0), bounds));
+            float vertical = max(GlyphMask(glyph - float2(0, stroke.y), bounds),
+                                 GlyphMask(glyph + float2(0, stroke.y), bounds));
+            float outline = max(horizontal, vertical) * (1 - smoothstep(.55, .95, mask));
+            float keyline = 1 - step(.179, ink);
+            glass = lerp(glass, keyline, outline * need * text.z * .85);
+        }
+    }
+    return lerp(glass, Appearance.rgb, mask * text.z);
 }
 
 float4 GlassPixel(Vertex v, bool overlay)
@@ -163,50 +300,48 @@ float4 GlassPixel(Vertex v, bool overlay)
     float scale = View.y / 1080.0;
     // The rounded corner must stay outside the rectangle occupied by the glyphs.
     float radius = max(0, min(min(Optics.w * scale, Depth.z * 3.41421356), min(halfSize.x, halfSize.y) - 1));
-    float2 q = abs(v.local) - (halfSize - radius);
-    float distance = SignedDistance(v.local, halfSize, radius);
+    bool continuous = LensShape.y > 0;
+    float2 normal;
+    float distance = ShapeDistance(v.local, halfSize, radius, continuous, normal);
     float coverage = saturate(0.5 - distance);
     float shadow = 0;
     if (Shadow.a > 0)
     {
-        float shadowEdge = SignedDistance(v.local - ShadowShape.yz * scale, halfSize, radius);
+        float2 unused;
+        float shadowEdge = ShapeDistance(v.local - ShadowShape.yz * scale, halfSize, radius, continuous, unused);
         shadow = saturate(1 - shadowEdge / max(1, ShadowShape.x * scale));
         shadow *= shadow * Shadow.a * strength;
     }
     if (coverage <= 0 && shadow <= 0) discard;
-    float2 edge = max(q, 0);
-    if (dot(edge, edge) < 0.0001)
-        edge = q.x > q.y ? float2(1, 0) : float2(0, 1);
-    float2 normal = normalize(edge) * sign(v.local);
-    float rim = Optics.x > 0 ? saturate(1 + distance / max(1.0, Optics.x * strength * scale)) : 0;
-    float press = saturate(Depth.w);
-    float2 displacement = Optics.y * (1 + .25 * press) * strength * rim * rim * normal * scale;
-
     float shadowAlpha = saturate(shadow);
     if (overlay && coverage <= 0) return float4(Shadow.rgb * shadowAlpha, shadowAlpha);
     float3 original = lerp(SampleBackground(v.position.xy), Shadow.rgb, shadowAlpha);
     if (coverage <= 0) return float4(original, 1);
-    float3 refracted = SampleGlass(v.position.xy - displacement, displacement, scale);
+    float lensHeight = Optics.x * strength * scale;
+    float rim = lensHeight > 0 ? saturate(1 + distance / max(lensHeight, 1e-5)) : 0;
+    float press = saturate(Depth.w);
+    float2 displacement = LensDisplacement(v.local, normal, rim, Optics.y * (1 + .25 * press) * strength * scale);
+    float blurWeight = BlurPass.w > 0 ? 1 : 0;
+    if (blurWeight > 0 && MaterialOptions.x > 0)
+    {
+        float edgeWidth = min(max(1, lensHeight * .6), halfSize.y * .3);
+        float centerWidth = max(edgeWidth + .5, min(halfSize.y * .8, edgeWidth + 14 * scale));
+        blurWeight = smoothstep(edgeWidth, centerWidth, -distance);
+    }
+    float3 refracted = SampleGlass(v.position.xy + displacement, displacement, v.local / halfSize, Optics.z * scale, blurWeight);
     float gray = dot(refracted, float3(.2126, .7152, .0722));
     float3 corrected = saturate((lerp(gray, refracted, Tone.x) - 0.5) * Tone.z + 0.5 + Tone.y);
     refracted = lerp(refracted, corrected, saturate(Appearance.w));
-    float direction = dot(normal, float2(cos(HighlightShape.x), sin(HighlightShape.x)));
-    float lighting = 0.18 + 0.82 * pow(saturate(direction), HighlightShape.y);
-    if (HighlightShape.w == 1) lighting = 0.35 + 0.65 * pow(abs(direction), HighlightShape.y);
-    if (HighlightShape.w == 2) lighting = 1;
-    float shine = HighlightColor.a * strength * saturate(HighlightShape.z * scale + distance) * lighting;
-    float3 glass = lerp(refracted, Tint.rgb, saturate(Tint.a * strength));
+    float3 glass = ApplyTint(refracted, strength);
     glass = lerp(glass, Surface.rgb, saturate(Surface.a * strength));
-    glass = lerp(glass, HighlightColor.rgb, saturate(shine));
     glass = lerp(glass, float3(1, 1, 1), press * (.035 + .075 * rim));
 
-    float2 glyph = (v.local - displacement * ShadowShape.w) / text.xy + 0.5;
+    float2 glyph = (v.local + displacement * ShadowShape.w) / text.xy + 0.5;
     float4 bounds = GlyphUv[v.index];
-    float2 uv = bounds.xy + saturate(glyph) * bounds.zw;
-    float mask = Lyrics.Sample(LinearClamp, uv) * text.z;
-    if (any(glyph < 0) || any(glyph > 1))
-        mask = 0;
-    glass = lerp(glass, Appearance.rgb, mask);
+    if (ShadowShape.w > 0) glass = CompositeText(glass, glyph, bounds, text.xyz, scale);
+    glass *= 1 - saturate(InnerShadow.x * strength * InnerShadowMask(v.local, halfSize, radius, continuous, distance, scale));
+    glass = ApplyRimHighlight(glass, distance, normal, scale, strength);
+    if (ShadowShape.w == 0) glass = CompositeText(glass, glyph, bounds, text.xyz, scale);
     if (overlay)
     {
         float visibleShadow = shadowAlpha * (1 - coverage);

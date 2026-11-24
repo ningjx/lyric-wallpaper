@@ -392,6 +392,8 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
             QueueWallpaper(s => s with { FontFamily = family });
         })));
         ColorField(grid, "文字颜色", wallpaper.TextColor, (s, v) => s with { TextColor = v });
+        Boolean(grid, "自适应文字对比度", wallpaper.AdaptiveContrast, (s, v) => s with { AdaptiveContrast = v },
+            "背景与文字过于接近时，自动加浅色或深色细描边，保留所选文字颜色。");
         Integer(grid, "字号（%）", wallpaper.FontScale, 50, 160, (s, v) => s with { FontScale = v });
         Integer(grid, "文字不透明度（%）", wallpaper.Opacity, 20, 100, (s, v) => s with { Opacity = v });
         Integer(grid, "行距（%）", wallpaper.Spacing, 35, 175, (s, v) => s with { Spacing = v });
@@ -430,18 +432,27 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         Integer(grid, "玻璃强度（%）", wallpaper.Glass, 0, 125, (s, v) => s with { Glass = v });
         Integer(grid, "折射高度", wallpaper.RefractionHeight, 0, 56, (s, v) => s with { RefractionHeight = v });
         Integer(grid, "折射强度", wallpaper.RefractionAmount, -80, 20, (s, v) => s with { RefractionAmount = v });
+        Boolean(grid, "镜片立体折射", wallpaper.OpticalDepth, (s, v) => s with { OpticalDepth = v },
+            "折射方向同时参考轮廓和卡片中心，不影响歌词远近的缩放与淡化。");
         Integer(grid, "背景模糊", wallpaper.Blur, 0, 36, (s, v) => s with { Blur = v });
         Boolean(grid, "高质量全场模糊", wallpaper.FullSceneBlur, (s, v) => s with { FullSceneBlur = v },
-            "背景模糊大于 0 且歌词在玻璃前方时生效。玻璃外仍显示清晰背景。");
+            "使用可分离高斯模糊。普通模糊和高质量模糊都不会影响玻璃外的背景。");
+        Boolean(grid, "渐进模糊", wallpaper.ProgressiveBlur, (s, v) => s with { ProgressiveBlur = v },
+            "背景模糊大于 0 时，中心柔化、边缘保留清晰折射；不会模糊背面歌词。");
         Integer(grid, "圆角", wallpaper.CornerRadius, 0, 180, (s, v) => s with { CornerRadius = v });
+        Boolean(grid, "连续曲率圆角", wallpaper.ContinuousCorners, (s, v) => s with { ContinuousCorners = v },
+            "让直边平滑过渡到圆角；关闭后使用普通圆弧。");
         Decimal(grid, "饱和度", wallpaper.Saturation, 0, 2.5, .01, (s, v) => s with { Saturation = v });
         Decimal(grid, "亮度", wallpaper.Brightness, -.5, .5, .01, (s, v) => s with { Brightness = v });
         Decimal(grid, "对比度", wallpaper.Contrast, .3, 2, .01, (s, v) => s with { Contrast = v });
         ColorField(grid, "染色", wallpaper.TintColor, (s, v) => s with { TintColor = v });
         Decimal(grid, "染色不透明度", wallpaper.TintAlpha, 0, .6, .01, (s, v) => s with { TintAlpha = v });
+        Boolean(grid, "色相染色", wallpaper.HueTint, (s, v) => s with { HueTint = v },
+            "先替换背景色相，再薄叠染色，保留更多背景明暗细节。");
         ColorField(grid, "表面色", wallpaper.SurfaceColor, (s, v) => s with { SurfaceColor = v });
         Decimal(grid, "表面不透明度", wallpaper.SurfaceAlpha, 0, .6, .01, (s, v) => s with { SurfaceAlpha = v });
-        Boolean(grid, "RGB 色差", wallpaper.Chromatic, (s, v) => s with { Chromatic = v });
+        Option(grid, "色散", ["关闭", "RGB 色差", "七路光谱"], (int)wallpaper.Dispersion,
+            (s, v) => s with { Chromatic = v == (int)ChromaticMode.Rgb, SpectralDispersion = v == (int)ChromaticMode.Spectral });
         Boolean(grid, "歌词置于玻璃背面", wallpaper.BehindGlass, (s, v) => s with { BehindGlass = v });
         return grid;
     }
@@ -457,12 +468,17 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         Decimal(grid, "高光角度", wallpaper.HighlightAngle, -3.14, 3.14, .01, (s, v) => s with { HighlightAngle = v });
         Decimal(grid, "高光衰减", wallpaper.HighlightFalloff, .2, 5, .01, (s, v) => s with { HighlightFalloff = v });
         Decimal(grid, "高光边缘宽度", wallpaper.HighlightWidth, .2, 6, .1, (s, v) => s with { HighlightWidth = v });
-        Boolean(grid, "启用阴影", wallpaper.Shadow, (s, v) => s with { Shadow = v });
+        Boolean(grid, "启用外阴影", wallpaper.Shadow, (s, v) => s with { Shadow = v });
         ColorField(grid, "阴影颜色", wallpaper.ShadowColor, (s, v) => s with { ShadowColor = v });
         Decimal(grid, "阴影不透明度", wallpaper.ShadowAlpha, 0, 1, .01, (s, v) => s with { ShadowAlpha = v });
         Integer(grid, "阴影模糊半径", wallpaper.ShadowRadius, 0, 80, (s, v) => s with { ShadowRadius = v });
         Integer(grid, "阴影水平偏移", wallpaper.ShadowX, -50, 50, (s, v) => s with { ShadowX = v });
         Integer(grid, "阴影垂直偏移", wallpaper.ShadowY, -50, 80, (s, v) => s with { ShadowY = v });
+        Boolean(grid, "启用内阴影", wallpaper.InnerShadow, (s, v) => s with { InnerShadow = v });
+        Decimal(grid, "内阴影不透明度", wallpaper.InnerShadowAlpha, 0, 1, .01, (s, v) => s with { InnerShadowAlpha = v });
+        Integer(grid, "内阴影模糊半径", wallpaper.InnerShadowRadius, 0, 32, (s, v) => s with { InnerShadowRadius = v });
+        Integer(grid, "内阴影水平偏移", wallpaper.InnerShadowX, -24, 24, (s, v) => s with { InnerShadowX = v });
+        Integer(grid, "内阴影垂直偏移", wallpaper.InnerShadowY, -24, 24, (s, v) => s with { InnerShadowY = v });
         return grid;
     }
 

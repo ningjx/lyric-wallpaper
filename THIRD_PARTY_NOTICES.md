@@ -2,7 +2,7 @@
 
 ## liquid-glass-webgl
 
-The [archived Wallpaper Engine branch](https://github.com/ningjx/lyric-wallpaper/tree/codex/wallpaper-engine) uses [liquid-glass-webgl](https://github.com/martin65536/liquid-glass-webgl). The Windows app implements its glass renderer in D3D11.
+The [archived Wallpaper Engine branch](https://github.com/ningjx/lyric-wallpaper/tree/codex/wallpaper-engine) uses [liquid-glass-webgl](https://github.com/martin65536/liquid-glass-webgl). The Windows app adapts its lens refraction, rim blending, spectral dispersion, and hue tint to D3D11, with native approximations for continuous corners, inner shadow, progressive blur, and adaptive contrast.
 
 The full Apache License 2.0 text is available at <https://www.apache.org/licenses/LICENSE-2.0>.
 

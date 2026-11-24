@@ -139,10 +139,38 @@ try
     WidgetLayer.Collect(scene.Visible, viewport, default, sampleText, feedback.WidgetId, feedback.Press, false, false, cards);
     Require(cards[0].Half == rest.Half && cards[0].Press == 1, "reduced motion shows feedback without scaling the widget");
 
-    File.WriteAllText(paths.Wallpaper, """{"FontScale":120,"Horizontal":12,"FullSceneBlur":true,"RenderScale":0.75}""");
+    File.WriteAllText(paths.Wallpaper, """{"FontScale":120,"Horizontal":12,"FullSceneBlur":true,"RenderScale":0.75,"Chromatic":true}""");
     var wallpaper = new WallpaperStore(paths.Wallpaper);
-    Require(wallpaper.Load() is { FontScale: 120, Horizontal: 12, FullSceneBlur: true, RenderScale: .75 },
+    var legacyWallpaper = wallpaper.Load();
+    Require(legacyWallpaper is { FontScale: 120, Horizontal: 12, FullSceneBlur: true, RenderScale: .75 },
         "existing wallpaper settings");
+    Require(legacyWallpaper.ToSceneStyle().Glass is { OpticalDepth: true, ContinuousCorners: true, InnerShadow.Alpha: 0 },
+        "older wallpaper files use the new lens and corner defaults without enabling inner shadow");
+
+    wallpaper.Save(legacyWallpaper with
+    {
+        OpticalDepth = false, ContinuousCorners = false, InnerShadow = true,
+        InnerShadowAlpha = 1.5, InnerShadowRadius = 40, InnerShadowX = -50, InnerShadowY = 12
+    });
+    var material = wallpaper.Load().ToSceneStyle();
+    Require(material.Glass is { OpticalDepth: false, ContinuousCorners: false, InnerShadow: var inner } &&
+        inner == new GlassInnerShadow(1, 32, -24, 12) && material.Lyrics.Depth,
+        "glass options persist, clamp inner shadow and leave lyric depth independent");
+    Require((legacyWallpaper with { DepthEffect = false }).ToSceneStyle().Glass.OpticalDepth,
+        "turning off lyric depth does not change optical depth");
+    var legacyStyle = legacyWallpaper.ToSceneStyle();
+    Require(legacyStyle.Glass is { Tone.Dispersion: ChromaticMode.Rgb, ProgressiveBlur: false, HueTint: false } &&
+        legacyStyle.Lyrics.AdaptiveContrast, "legacy RGB stays RGB, with conservative optics and adaptive outline defaults");
+
+    wallpaper.Save(legacyWallpaper with
+    {
+        ProgressiveBlur = true, SpectralDispersion = true, HueTint = true, AdaptiveContrast = false, BehindGlass = true
+    });
+    var advancedStyle = wallpaper.Load().ToSceneStyle();
+    Require(advancedStyle.Glass is { ProgressiveBlur: true, Tone.Dispersion: ChromaticMode.Spectral, HueTint: true } &&
+        advancedStyle.Lyrics is { AdaptiveContrast: false, BehindGlass: true },
+        "advanced glass options persist and spectral dispersion takes precedence over legacy RGB");
+    Require(new WallpaperSettings().Dispersion == ChromaticMode.Off, "spectral dispersion remains opt-in");
 
     Directory.CreateDirectory(paths.Logs);
     File.WriteAllText(paths.Playback, """{"music":{"enable_netease":false,"enable_apple":false},"extra":{"future":1}}""");

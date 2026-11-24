@@ -16,6 +16,7 @@ internal sealed record WallpaperSettings
     public string FontFamily { get; init; } = "Microsoft YaHei UI";
     public int FontScale { get; init; } = 100;
     public int TextColor { get; init; } = unchecked((int)0xFFF0FBFF);
+    public bool AdaptiveContrast { get; init; } = true;
     public int Opacity { get; init; } = 100;
     public int Spacing { get; init; } = 100;
     public int Vertical { get; init; } = -11;
@@ -34,15 +35,19 @@ internal sealed record WallpaperSettings
     public int Glass { get; init; } = 100;
     public int RefractionHeight { get; init; } = 11;
     public int RefractionAmount { get; init; } = -44;
+    public bool OpticalDepth { get; init; } = true;
     public int Blur { get; init; }
     public bool FullSceneBlur { get; init; }
+    public bool ProgressiveBlur { get; init; }
     public bool BehindGlass { get; init; }
     public double Saturation { get; init; } = 1;
     public double Brightness { get; init; }
     public double Contrast { get; init; } = 1;
     public int CornerRadius { get; init; } = 35;
+    public bool ContinuousCorners { get; init; } = true;
     public bool DepthEffect { get; init; } = true;
     public bool Chromatic { get; init; }
+    public bool SpectralDispersion { get; init; }
     public bool Highlight { get; init; } = true;
     public HighlightStyle HighlightMode { get; init; }
     public int HighlightColor { get; init; } = unchecked((int)0xFFB8EBFF);
@@ -56,8 +61,14 @@ internal sealed record WallpaperSettings
     public int ShadowRadius { get; init; } = 28;
     public int ShadowX { get; init; }
     public int ShadowY { get; init; } = 16;
+    public bool InnerShadow { get; init; }
+    public double InnerShadowAlpha { get; init; } = .25;
+    public int InnerShadowRadius { get; init; } = 8;
+    public int InnerShadowX { get; init; }
+    public int InnerShadowY { get; init; } = 3;
     public int TintColor { get; init; } = unchecked((int)0xFF2E85B8);
     public double TintAlpha { get; init; }
+    public bool HueTint { get; init; }
     public int SurfaceColor { get; init; } = unchecked((int)0xFFCCF0FF);
     public double SurfaceAlpha { get; init; }
     public bool Translation { get; init; } = true;
@@ -66,15 +77,19 @@ internal sealed record WallpaperSettings
     public int Fps { get; init; } = 60;
     public double RenderScale { get; init; } = 1;
 
+    internal ChromaticMode Dispersion => SpectralDispersion ? ChromaticMode.Spectral :
+        Chromatic ? ChromaticMode.Rgb : ChromaticMode.Off;
+
     public SceneStyle ToSceneStyle() => new(
         new(Layout, BackgroundZoom, BackgroundX, BackgroundY),
-        new(Glass / 100f, RefractionHeight, RefractionAmount, Blur, CornerRadius, FullSceneBlur,
-            new((float)Saturation, (float)Brightness, (float)Contrast, Chromatic),
+        new(Glass / 100f, RefractionHeight, RefractionAmount, Blur, CornerRadius, FullSceneBlur, ProgressiveBlur,
+            OpticalDepth, ContinuousCorners, new((float)Saturation, (float)Brightness, (float)Contrast, Dispersion),
             new(new(HighlightColor, Highlight ? (float)HighlightAlpha : 0),
                 (float)HighlightAngle, (float)HighlightFalloff, (float)HighlightWidth, HighlightMode),
-            new(TintColor, (float)TintAlpha), new(SurfaceColor, (float)SurfaceAlpha),
-            new(new(ShadowColor, Shadow ? (float)ShadowAlpha : 0), ShadowRadius, ShadowX, ShadowY)),
-        new(TextColor, (float)FarGlass, DepthEffect, BehindGlass));
+            new(TintColor, (float)TintAlpha), HueTint, new(SurfaceColor, (float)SurfaceAlpha),
+            new(new(ShadowColor, Shadow ? (float)ShadowAlpha : 0), ShadowRadius, ShadowX, ShadowY),
+            new(InnerShadow ? (float)InnerShadowAlpha : 0, InnerShadowRadius, InnerShadowX, InnerShadowY)),
+        new(TextColor, (float)FarGlass, DepthEffect, BehindGlass, AdaptiveContrast));
 
     public WallpaperSettings Normalize() => this with
     {
@@ -119,6 +134,10 @@ internal sealed record WallpaperSettings
         ShadowRadius = Math.Clamp(ShadowRadius, 0, 80),
         ShadowX = Math.Clamp(ShadowX, -50, 50),
         ShadowY = Math.Clamp(ShadowY, -50, 80),
+        InnerShadowAlpha = Math.Clamp(InnerShadowAlpha, 0, 1),
+        InnerShadowRadius = Math.Clamp(InnerShadowRadius, 0, 32),
+        InnerShadowX = Math.Clamp(InnerShadowX, -24, 24),
+        InnerShadowY = Math.Clamp(InnerShadowY, -24, 24),
         TintAlpha = Math.Clamp(TintAlpha, 0, .6),
         SurfaceAlpha = Math.Clamp(SurfaceAlpha, 0, .6),
         OffsetMs = Math.Clamp(OffsetMs, -5000, 5000),
