@@ -146,8 +146,9 @@ internal sealed class NativeGlassSlider : Ui.Slider, INativeGlassControl
         GlassInput.Invalidate(this);
     }
 
-    protected override void OnMouseLeftButtonDown(Input.MouseButtonEventArgs e)
+    protected override void OnPreviewMouseLeftButtonDown(Input.MouseButtonEventArgs e)
     {
+        // The base Slider can handle the bubbling press when taking keyboard focus.
         Focus();
         if (!CaptureMouse()) return;
         dragging = true;
