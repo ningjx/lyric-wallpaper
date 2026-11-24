@@ -121,19 +121,36 @@ try
     lightCanvas.FillRectangle(Brushes.Cyan, 98, 78, 20, 20);
     var lights = new WallpaperLightMap(lightImage);
     var screen = new Vector2(1920, 1080);
-    var source = lights.Find(screen, Vector2.One, 1, Vector2.Zero, tile: false);
-    Require(source is { } cyan && cyan.Position.X > 1500 && cyan.Position.Y > 650 &&
-        cyan.Color.Z > cyan.Color.X + .3f, "visible dominant light preserves its cool color and screen location");
+    var sources = lights.Find(screen, Vector2.One, 1, Vector2.Zero, tile: false);
+    Require(sources is [{ } cyan, { } red] && cyan.Position.X > 1500 && cyan.Position.Y > 650 &&
+        cyan.Color.Z > cyan.Color.X + .3f && red.Color.X > red.Color.Z + .3f,
+        "two distinct light sources preserve their positions and colors");
     var cropped = lights.Find(screen, Vector2.One, 2, new(.65f, .65f), tile: false);
-    Require(cropped is { } warm && warm.Position.X < 950 && warm.Position.Y < 600 &&
+    Require(cropped is [{ } warm] && warm.Position.X < 950 && warm.Position.Y < 600 &&
         warm.Color.X > warm.Color.Z + .3f, "cropping excludes the hidden light and remaps the visible warm light");
-    var fixture = source!.Value;
-    Require(Math.Abs(fixture.At(fixture.Position - new Vector2(200, 0), screen.Y).Angle) < .001 &&
-        Math.Abs(Math.Abs(fixture.At(fixture.Position + new Vector2(200, 0), screen.Y).Angle) - MathF.PI) < .001 &&
-        fixture.At(fixture.Position, screen.Y).Focus == 0,
-        "widgets on opposite sides of the light face opposite directions with a neutral center");
+    var fixture = sources[0];
+    var near = fixture.At(fixture.Position - new Vector2(200, 0), screen.Y);
+    var far = fixture.At(fixture.Position + new Vector2(800, 0), screen.Y);
+    Require(near.Direction == Vector2.UnitX && far.Direction == -Vector2.UnitX &&
+        near.Weight > far.Weight && fixture.At(fixture.Position, screen.Y).Focus == 0,
+        "widget highlights face the light, favor nearer sources and stay neutral directly on the source");
+    lightCanvas.Clear(Color.FromArgb(24, 24, 24));
+    lightCanvas.FillRectangle(Brushes.White, 8, 16, 20, 80);
+    lightCanvas.FillRectangle(Brushes.Cyan, 48, 10, 18, 20);
+    lightCanvas.FillRectangle(Brushes.Gold, 90, 10, 18, 20);
+    lightCanvas.FillRectangle(Brushes.Lime, 48, 62, 18, 20);
+    lightCanvas.FillRectangle(Brushes.Orange, 90, 64, 18, 20);
+    Require(new WallpaperLightMap(lightImage).Find(screen, Vector2.One, 1, Vector2.Zero, tile: false)
+        is [{ } broad, _, _, _] && broad.Position.X < 430 && broad.Position.Y is > 400 and < 560,
+        "at most four separate sources are selected and a continuous bright strip remains one light");
+    lightCanvas.Clear(Color.FromArgb(24, 24, 24));
+    lightCanvas.FillRectangle(Brushes.White, 15, 15, 22, 22);
+    lightCanvas.FillRectangle(Brushes.Gray, 90, 90, 15, 15);
+    lightCanvas.FillRectangle(Brushes.White, 84, 51, 1, 1);
+    Require(new WallpaperLightMap(lightImage).Find(screen, Vector2.One, 1, Vector2.Zero, tile: false)
+        is [{ } bright] && bright.Position.X < 600, "weak patches and isolated bright specks do not fill the light slots");
     lightCanvas.Clear(Color.LightGray);
-    Require(new WallpaperLightMap(lightImage).Find(screen, Vector2.One, 1, Vector2.Zero, tile: false) is null,
+    Require(new WallpaperLightMap(lightImage).Find(screen, Vector2.One, 1, Vector2.Zero, tile: false).Length == 0,
         "flat wallpaper falls back to manual highlight");
 
     var scene = new WidgetScene(catalog);

@@ -463,7 +463,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         Boolean(grid, "启用高光", wallpaper.Highlight, (s, v) => s with { Highlight = v });
         var followWallpaper = Boolean(grid, "控件高光跟随壁纸", wallpaper.WidgetWallpaperHighlight,
             (s, v) => s with { WidgetWallpaperHighlight = v },
-            "根据壁纸可见区域的主亮区为每个控件计算高光方向和颜色。找不到明显亮区时沿用已保存的手动值。");
+            "从壁纸可见区域识别最多四个明显亮区，各控件按光源方向、颜色和距离混合高光。没有明显亮区时沿用手动值。");
         Option(grid, "高光模式", ["默认", "环境", "纯净"], (int)wallpaper.HighlightMode,
             (s, v) => s with { HighlightMode = (HighlightStyle)v });
         var highlightColor = ColorField(grid, "高光颜色", wallpaper.HighlightColor, (s, v) => s with { HighlightColor = v });

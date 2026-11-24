@@ -25,7 +25,8 @@ cbuffer Scene : register(b0)
     float4 LensShape;
     float4 InnerShadow;
     float4 MaterialOptions;
-    float4 WallpaperHighlight;
+    float4 WallpaperLightDirection[4];
+    float4 WallpaperLightColor[4];
 };
 
 cbuffer BlurKernel : register(b1)
@@ -188,13 +189,19 @@ float3 ApplyRimHighlight(float3 glass, float distance, float2 normal, float scal
     if (opacity <= 0 || distance <= -width - softness) return glass;
 
     float band = 1 - smoothstep(max(0.0, width - softness), width + softness, -distance);
-    float direction = dot(normal, float2(cos(HighlightShape.x), sin(HighlightShape.x)));
     if (HighlightShape.w == 3)
     {
-        float facing = pow(saturate(direction), HighlightShape.y);
-        float intensity = lerp(.25, .12 + .88 * facing, WallpaperHighlight.w);
-        return saturate(glass + WallpaperHighlight.rgb * saturate(opacity * band * intensity));
+        float3 light = 0;
+        [unroll] for (int source = 0; source < 4; source++)
+        {
+            float4 probe = WallpaperLightDirection[source];
+            float facing = pow(saturate(dot(normal, probe.xy)), HighlightShape.y);
+            float intensity = lerp(.25, .08 + .92 * facing, probe.z);
+            light += WallpaperLightColor[source].rgb * intensity * probe.w;
+        }
+        return saturate(glass + light * saturate(opacity * band));
     }
+    float direction = dot(normal, float2(cos(HighlightShape.x), sin(HighlightShape.x)));
     float intensity = HighlightShape.w == 2 ? 1 : pow(saturate(abs(direction)), HighlightShape.y);
     float alpha = saturate(opacity * band * intensity);
     if (HighlightShape.w == 1)

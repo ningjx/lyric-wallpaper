@@ -35,8 +35,9 @@ internal sealed unsafe class D3D11Renderer : IDisposable
     private Bitmap backgroundBitmap;
     private WallpaperLightMap? lightMap;
     private (BackgroundView View, int Width, int Height)? lightKey;
-    private WallpaperLight? wallpaperLight;
-    public const int SceneVectors = 66;
+    private WallpaperLight[] wallpaperLights = [];
+    private const int WallpaperLightsOffset = 65;
+    public const int SceneVectors = WallpaperLightsOffset + WallpaperLightMap.MaxSources * 2;
     public int OutputWidth { get; }
     public int OutputHeight { get; }
     public int Width { get; private set; }
@@ -207,9 +208,9 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         if (frame.Lyrics.Count != 0) DrawCards(cardVs, cardPs, (uint)frame.Lyrics.Count);
         if (frame.Widgets.Count > 0)
         {
-            var light = FindWallpaperLight(scene, frame.Style);
+            var lights = FindWallpaperLights(scene, frame.Style);
             SetBlend(widgetBlend);
-            foreach (var card in frame.Widgets) DrawWidget(scene, card, frame.Style.Glass.Strength, widgetPs, light);
+            foreach (var card in frame.Widgets) DrawWidget(scene, card, frame.Style.Glass.Strength, widgetPs, lights);
             SetBlend(0);
         }
         if (capturePath is not null) SaveFrame(capturePath);
@@ -234,7 +235,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         DrawBackground(previewBackgroundPs);
         SetViewport(Width / step, Height / step, -origin.X / step, -origin.Y / step);
         SetBlend(widgetBlend);
-        DrawWidget(scene, card, style.Glass.Strength, previewWidgetPs, FindWallpaperLight(scene, style));
+        DrawWidget(scene, card, style.Glass.Strength, previewWidgetPs, FindWallpaperLights(scene, style));
         SetBlend(0);
         SetTarget(0);
         return new(type, PreviewWidth, PreviewHeight, ReadPreviewPixels());
@@ -287,7 +288,7 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         scene[62] = new(material.OpticalDepth ? 1 : 0, material.ContinuousCorners ? 1 : 0, 0, 0);
         scene[63] = new(material.InnerShadow.Alpha, material.InnerShadow.Radius, material.InnerShadow.X, material.InnerShadow.Y);
         scene[64] = new(material.ProgressiveBlur ? 1 : 0, material.HueTint ? 1 : 0, lyricsStyle.AdaptiveContrast ? 1 : 0, 0);
-        scene[65] = default;
+        scene[WallpaperLightsOffset..].Clear();
         for (int i = 0; i < lyricsCards.Count; i++) PackCard(scene, i, lyricsCards[i]);
         bool blurEnabled = material.Blur > 0 && material.Strength > 0 && (!lyricsStyle.BehindGlass || material.ProgressiveBlur);
         bool sampleBlur = blurEnabled && (lyricsCards.Count != 0 || hasWidgets);
@@ -327,35 +328,38 @@ internal sealed unsafe class D3D11Renderer : IDisposable
         ((delegate* unmanaged[Stdcall]<nint, uint, uint, void>)Slot(context, (int)Context.Draw))(context, 3, 0);
     }
 
-    private WallpaperLight? FindWallpaperLight(ReadOnlySpan<Vector4> scene, SceneStyle style)
+    private ReadOnlySpan<WallpaperLight> FindWallpaperLights(ReadOnlySpan<Vector4> scene, SceneStyle style)
     {
         if (!style.Glass.Highlight.FollowWallpaper || style.Glass.Highlight.Color.Alpha <= 0 || style.Glass.Strength <= 0)
-            return null;
+            return [];
         var key = (style.Background, Width, Height);
         if (key != lightKey)
         {
             lightMap ??= new WallpaperLightMap(backgroundBitmap);
             var view = scene[0];
             var transform = scene[34];
-            wallpaperLight = lightMap.Find(new(view.X, view.Y), new(view.Z, view.W), transform.X,
+            wallpaperLights = lightMap.Find(new(view.X, view.Y), new(view.Z, view.W), transform.X,
                 new(transform.Y, transform.Z), transform.W > 0);
             lightKey = key;
         }
-        return wallpaperLight;
+        return wallpaperLights;
     }
 
-    private void DrawWidget(Span<Vector4> scene, GlassCard card, float strength, nint pixelShader, WallpaperLight? light)
+    private void DrawWidget(Span<Vector4> scene, GlassCard card, float strength, nint pixelShader, ReadOnlySpan<WallpaperLight> lights)
     {
         PackCard(scene, 0, card);
         scene[33] = PackColor(card.Color, strength);
         scene[43] = new(1, 0, card.Padding, card.Press);
         scene[64].W = card.AutoInvertText ? 1 : 0;
-        scene[65] = default;
-        if (light is { } source)
+        if (!lights.IsEmpty)
         {
-            var (angle, focus) = source.At(card.Center, Height);
-            scene[65] = new(source.Color, focus);
-            scene[38].X = angle;
+            for (int index = 0; index < lights.Length; index++)
+            {
+                var light = lights[index];
+                var (direction, focus, weight) = light.At(card.Center, Height);
+                scene[WallpaperLightsOffset + index] = new(direction, focus, weight);
+                scene[WallpaperLightsOffset + WallpaperLightMap.MaxSources + index] = new(light.Color, 0);
+            }
             scene[38].W = 3;
         }
         WriteConstants(scene);

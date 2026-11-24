@@ -4,18 +4,22 @@ using System.Numerics;
 
 namespace LyricWallpaper.Rendering;
 
-internal readonly record struct WallpaperLight(Vector2 Position, Vector3 Color)
+internal readonly record struct WallpaperLight(Vector2 Position, Vector3 Color, float Strength)
 {
-    public (float Angle, float Focus) At(Vector2 center, float screenHeight)
+    public (Vector2 Direction, float Focus, float Weight) At(Vector2 center, float screenHeight)
     {
         var offset = Position - center;
-        return (MathF.Atan2(offset.Y, offset.X), Math.Clamp(offset.Length() / (screenHeight * .04f), 0, 1));
+        float distance = offset.Length();
+        float falloff = distance / (screenHeight * .6f);
+        return (distance > 0 ? offset / distance : Vector2.Zero, Math.Min(1, distance / (screenHeight * .04f)),
+            Strength / (1 + falloff * falloff));
     }
 }
 
 internal sealed class WallpaperLightMap
 {
-    private const int ThumbnailSize = 128, Columns = 64, Rows = 36, Radius = 3;
+    public const int MaxSources = 4;
+    private const int ThumbnailSize = 128, Columns = 64, Rows = 36;
     private readonly Vector3[] pixels = new Vector3[ThumbnailSize * ThumbnailSize];
 
     public WallpaperLightMap(Bitmap bitmap)
@@ -35,7 +39,7 @@ internal sealed class WallpaperLightMap
         }
     }
 
-    public WallpaperLight? Find(Vector2 size, Vector2 uvScale, float zoom, Vector2 offset, bool tile)
+    public WallpaperLight[] Find(Vector2 size, Vector2 uvScale, float zoom, Vector2 offset, bool tile)
     {
         Span<Vector3> colors = stackalloc Vector3[Columns * Rows];
         Span<float> light = stackalloc float[colors.Length];
@@ -56,7 +60,7 @@ internal sealed class WallpaperLightMap
             sum += light[index] = .75f * luminance + .25f * MaxChannel(linear);
             visible++;
         }
-        if (visible == 0) return null;
+        if (visible == 0) return [];
         float threshold = Math.Max(.16f, sum / visible + .07f);
         for (int index = 0; index < light.Length; index++)
         {
@@ -64,35 +68,43 @@ internal sealed class WallpaperLightMap
             light[index] = excess * excess;
         }
 
-        float best = .02f;
-        int bestRow = -1, bestColumn = -1;
-        for (int row = 0; row < Rows; row++)
-        for (int column = 0; column < Columns; column++)
+        var regions = new List<WallpaperLight>();
+        Span<(int Index, float Weight)> queue = stackalloc (int, float)[light.Length];
+        for (int start = 0; start < light.Length; start++)
         {
-            if (light[row * Columns + column] == 0) continue;
-            float score = 0;
-            for (int sampleRow = Math.Max(0, row - Radius); sampleRow <= Math.Min(Rows - 1, row + Radius); sampleRow++)
-            for (int sampleColumn = Math.Max(0, column - Radius); sampleColumn <= Math.Min(Columns - 1, column + Radius); sampleColumn++)
-                score += light[sampleRow * Columns + sampleColumn] * Weight(sampleColumn - column, sampleRow - row);
-            if (score <= best) continue;
-            (best, bestRow, bestColumn) = (score, row, column);
+            if (light[start] <= 0) continue;
+            queue[0] = (start, light[start]);
+            light[start] = 0;
+            int count = 1;
+            float total = 0, peak = 0;
+            Vector2 position = default;
+            Vector3 tint = default;
+            for (int current = 0; current < count; current++)
+            {
+                var (index, weight) = queue[current];
+                int row = index / Columns, column = index % Columns;
+                total += weight;
+                peak = Math.Max(peak, weight);
+                position += new Vector2((column + .5f) / Columns, (row + .5f) / Rows) * weight;
+                tint += colors[index] * weight;
+                for (int neighborRow = Math.Max(0, row - 1); neighborRow <= Math.Min(Rows - 1, row + 1); neighborRow++)
+                for (int neighborColumn = Math.Max(0, column - 1); neighborColumn <= Math.Min(Columns - 1, column + 1); neighborColumn++)
+                {
+                    int neighbor = neighborRow * Columns + neighborColumn;
+                    if (light[neighbor] <= 0) continue;
+                    queue[count++] = (neighbor, light[neighbor]);
+                    light[neighbor] = 0;
+                }
+            }
+            if (count < 3 || total < .035f) continue;
+            float strength = MathF.Sqrt(peak) * MathF.Sqrt(Math.Min(total, peak * 48));
+            regions.Add(new(position / total * size, Vector3.Lerp(Vector3.One, tint / MaxChannel(tint), .68f), strength));
         }
-        if (bestRow < 0) return null;
-
-        float total = 0;
-        Vector2 position = default;
-        Vector3 tint = default;
-        for (int row = Math.Max(0, bestRow - Radius); row <= Math.Min(Rows - 1, bestRow + Radius); row++)
-        for (int column = Math.Max(0, bestColumn - Radius); column <= Math.Min(Columns - 1, bestColumn + Radius); column++)
-        {
-            int index = row * Columns + column;
-            float weight = light[index] * Weight(column - bestColumn, row - bestRow);
-            if (weight <= 0) continue;
-            total += weight;
-            position += new Vector2((column + .5f) / Columns, (row + .5f) / Rows) * weight;
-            tint += colors[index] * weight;
-        }
-        return new(position / total * size, Vector3.Lerp(Vector3.One, tint / MaxChannel(tint), .68f));
+        if (regions.Count == 0) return [];
+        regions.Sort(static (first, second) => second.Strength.CompareTo(first.Strength));
+        float strongest = regions[0].Strength;
+        return regions.Take(MaxSources).TakeWhile(region => region.Strength >= strongest * .12f)
+            .Select(region => region with { Strength = region.Strength / strongest }).ToArray();
     }
 
     private Vector3 Sample(Vector2 uv)
@@ -105,9 +117,6 @@ internal sealed class WallpaperLightMap
             Vector3.Lerp(pixels[bottom * ThumbnailSize + left], pixels[bottom * ThumbnailSize + right], pixel.X - left),
             pixel.Y - top);
     }
-
-    private static float Weight(int horizontal, int vertical) =>
-        1f / (1f + .24f * (horizontal * horizontal + vertical * vertical));
 
     private static float MaxChannel(Vector3 color) => Math.Max(color.X, Math.Max(color.Y, color.Z));
 }
