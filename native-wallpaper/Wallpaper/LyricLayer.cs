@@ -17,13 +17,14 @@ internal static class LyricLayer
     private static readonly LyricLine[] DemoLines = Lines.Select((line, i) => new LyricLine(Times[i], line)).ToArray();
     private static readonly LyricLine[] TestLines = BuildTestLines();
 
-    public static double LeadSeconds(int height, WallpaperSettings settings)
+    public static double LeadSeconds(int width, int height, WallpaperSettings settings)
     {
-        var gap = RowGap(height, settings);
+        // Approximate the distance between centers using a two-line card and the edge gap.
+        double step = EdgeGap(height, settings) + 2 * (Math.Max(8, NominalFontSize(width, settings)) + Padding(height, settings));
         double speed = settings.ScrollSpeed;
         double normalized = 0;
-        while (normalized < 12 && (gap * (1 + normalized) * Math.Exp(-normalized) > .75 ||
-                                   gap * speed * normalized * Math.Exp(-normalized) > 3))
+        while (normalized < 12 && (step * (1 + normalized) * Math.Exp(-normalized) > .75 ||
+                                   step * speed * normalized * Math.Exp(-normalized) > 3))
             normalized += .05;
         return normalized / speed + .03;
     }
@@ -75,47 +76,80 @@ internal static class LyricLayer
     {
         int width = viewport.Width, height = viewport.Height;
         double focus = frame.Focus;
-        float gap = RowGap(height, settings);
-        float padding = settings.Padding * height / 1080f;
         int first = Math.Max(0, (int)Math.Ceiling(focus - settings.RenderDistance));
         int end = Math.Min(frame.Lines.Length, (int)Math.Floor(focus + settings.RenderDistance) + 1);
         if (end <= first) return;
 
+        float gap = EdgeGap(height, settings);
+        float padding = Padding(height, settings);
+        double fontSize = NominalFontSize(width, settings);
         float originY = height * (.5f + settings.Vertical / 100f + settings.TextY / 1080f);
         float horizontalOffset = width * settings.Horizontal / 100f;
         int active = Math.Clamp((int)Math.Round(focus), first, end - 1);
-        // Draw the closest line last, above the cards and shadows of surrounding lines.
-        for (int i = first; i <= end; i++)
+        int anchor = Math.Clamp((int)Math.Floor(focus), first, end - 1);
+        var anchorCard = Measure(anchor);
+        float fraction = anchor + 1 < end ? (float)Math.Clamp(focus - anchor, 0, 1) : 0;
+        var nextCard = fraction > 0 ? Measure(anchor + 1) : default;
+        // Keep the interpolated focus at the same screen position as both cards change height.
+        float anchorY = originY - fraction * (anchorCard.Half.Y + gap + nextCard.Half.Y);
+        GlassCard? foreground = null;
+        int firstCard = cards.Count;
+        Place(anchor, anchorCard, anchorY);
+
+        float top = anchorY - anchorCard.Half.Y;
+        for (int i = anchor - 1; i >= first && top > gap; i--)
         {
-            if (i == active) continue;
-            int index = i == end ? active : i;
+            float bottom = top - gap;
+            var card = Measure(i);
+            Place(i, card, bottom - card.Half.Y);
+            top = bottom - 2 * card.Half.Y;
+        }
+        cards.Reverse(firstCard, cards.Count - firstCard);
+
+        float lowerEdge = anchorY + anchorCard.Half.Y;
+        for (int i = anchor + 1; i < end && lowerEdge + gap < height; i++)
+        {
+            float nextTop = lowerEdge + gap;
+            var card = i == anchor + 1 && fraction > 0 ? nextCard : Measure(i);
+            Place(i, card, nextTop + card.Half.Y);
+            lowerEdge = nextTop + 2 * card.Half.Y;
+        }
+        // Draw the closest line last, above any surrounding shadows.
+        if (foreground is { } closest) cards.Add(closest);
+
+        GlassCard Measure(int index)
+        {
             double distance = Math.Abs(focus - index);
-            float y = originY + (float)((index - focus) * gap);
             var scaled = settings.DepthEffect
                 ? settings.FarScale + (1 - settings.FarScale) / (1 + settings.ScaleFalloff * (Math.Pow(1 + distance, settings.ScaleCurve) - 1))
                 : 1;
             var alpha = settings.DepthEffect ? (float)Math.Exp(-settings.FadeFalloff * (Math.Pow(1 + distance, settings.FadeCurve) - 1)) : 1;
-            float font = (float)Math.Max(8, width * .05 * .87 * scaled * settings.FontScale / 100);
-            // Skip off-screen rows before rasterizing. A title and translation fit within three font heights.
-            float checkHeight = font * 1.5f + padding;
-            if (y + checkHeight <= 0 || y - checkHeight >= height) continue;
+            float font = (float)Math.Max(8, fontSize * scaled);
             var line = frame.Lines[index];
-            if (!settings.Translation && !line.IsMetadata) line = line with { Translation = null };
-            var glyph = text.Get(new SceneText(line.Text, line.Translation, settings.FontFamily));
-            if (glyph.InkSize == Vector2.Zero) continue;
+            var translation = settings.Translation || line.IsMetadata ? line.Translation : null;
+            var glyph = text.Get(new SceneText(line.Text, translation, settings.FontFamily));
+            if (glyph.InkSize == Vector2.Zero) return default;
             var inkSize = glyph.InkSize * (font / ISceneText.FontPixels);
             var half = inkSize / 2 + new Vector2(padding);
-            if (y + half.Y <= 0 || y - half.Y >= height) continue;
             float x = settings.Alignment switch
             {
                 LyricAlignment.Left => half.X + width * .075f,
                 LyricAlignment.Right => width * .925f - half.X,
                 _ => width / 2f
             };
-            x += horizontalOffset;
-            cards.Add(new(new(x, y), half, inkSize, glyph.Uv, settings.TextColor, alpha * settings.Opacity / 100f, padding));
+            return new(new(x + horizontalOffset, 0), half, inkSize, glyph.Uv, settings.TextColor, alpha * settings.Opacity / 100f, padding);
+        }
+
+        void Place(int index, GlassCard card, float y)
+        {
+            if (card.Ink == Vector2.Zero || y + card.Half.Y <= 0 || y - card.Half.Y >= height) return;
+            card = card with { Center = new(card.Center.X, y) };
+            if (index == active) foreground = card;
+            else cards.Add(card);
         }
     }
 
-    private static float RowGap(int height, WallpaperSettings settings) => height * (.135f + 83f / 1080) * settings.Spacing / 100;
+    private static float EdgeGap(int height, WallpaperSettings settings) => height * (83f / 1080) * settings.Spacing / 100;
+    private static float Padding(int height, WallpaperSettings settings) => settings.Padding * height / 1080f;
+    private static double NominalFontSize(int width, WallpaperSettings settings) => width * .05 * .87 * settings.FontScale / 100;
 }

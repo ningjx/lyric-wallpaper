@@ -92,7 +92,7 @@ internal static class DesktopScene
                 dockPreviews.Invalidate();
             if (renderer is not null)
             {
-                lead = LyricLayer.LeadSeconds(renderer.OutputHeight, next);
+                lead = LyricLayer.LeadSeconds(renderer.OutputWidth, renderer.OutputHeight, next);
                 report.RenderWidth = renderer.Width;
                 report.RenderHeight = renderer.Height;
             }
@@ -162,7 +162,7 @@ internal static class DesktopScene
                             report.Parent = FormatHandle(target.Layer.Parent);
                             report.Icons = FormatHandle(target.Layer.Icons);
                             report.Attachments++;
-                            lead = LyricLayer.LeadSeconds(client.Height, wallpaper.Appearance);
+                            lead = LyricLayer.LeadSeconds(client.Width, client.Height, wallpaper.Appearance);
                             dirty = true;
                             lastPresent = -1;
                             nextFrame = 0;

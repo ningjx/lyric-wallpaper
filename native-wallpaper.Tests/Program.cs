@@ -242,6 +242,36 @@ try
     var frame = timeline.At(0, .1, new WallpaperSettings());
     Require(!frame.Idle && frame.Lines.Any(line => line.Translation == "译文") &&
         timeline.At(31, .1, new WallpaperSettings()).Idle, "lyrics timeline keeps translation and idle transitions");
+
+    LyricLine[] mixedLyrics = [new(0, "第一句"), new(10, "第二句"), new(20, "第三句", "译文"), new(30, "第四句", "译文")];
+    var lyricViewport = new SceneViewport(1440, 810, display);
+    var lyricText = new LyricTestText();
+    bool gapsMatch = true, focusMatches = true;
+    foreach (bool depth in new[] { false, true })
+    foreach (bool translations in new[] { false, true })
+    foreach (double focus in new[] { 1.25, 1.5, 1.75, 1.999, 2.0, 2.001 })
+    {
+        var appearance = new WallpaperSettings { DepthEffect = depth, Translation = translations, Vertical = 0, Spacing = 75 };
+        var lyricFrame = new LyricFrame(mixedLyrics, focus, focus != 2, 30);
+        cards.Clear();
+        LyricLayer.Collect(lyricFrame, appearance, lyricViewport, lyricText, cards);
+        var ordered = cards.OrderBy(card => card.Center.Y).ToArray();
+        if (ordered.Length != mixedLyrics.Length)
+            throw new InvalidOperationException("Expected every test lyric to be visible.");
+        float expectedGap = 83 * .75f * .75f;
+        for (int i = 1; i < ordered.Length; i++)
+        {
+            float upperBottom = ordered[i - 1].Center.Y + ordered[i - 1].Half.Y;
+            float lowerTop = ordered[i].Center.Y - ordered[i].Half.Y;
+            gapsMatch &= Math.Abs(lowerTop - upperBottom - expectedGap) < .01;
+        }
+        int anchor = (int)focus;
+        double focusY = ordered[anchor].Center.Y + (focus - anchor) * (ordered[anchor + 1].Center.Y - ordered[anchor].Center.Y);
+        focusMatches &= Math.Abs(focusY - lyricViewport.Height * .5f) < .01 &&
+            cards[^1] == ordered[(int)Math.Round(focus)];
+    }
+    Require(gapsMatch, "mixed lyrics keep the same glass edge gap with translation and depth toggled");
+    Require(focusMatches, "scroll focus stays anchored while the nearest lyric draws last");
 }
 finally
 {
@@ -264,4 +294,9 @@ static void Require(bool condition, string message)
 file sealed class WidgetTestText : ISceneText
 {
     public TextGlyph Get(SceneText text) => new(new(190, 76), default);
+}
+
+file sealed class LyricTestText : ISceneText
+{
+    public TextGlyph Get(SceneText text) => new(new(450, text.Secondary is null ? 126 : 222), default);
 }
