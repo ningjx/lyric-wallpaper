@@ -25,7 +25,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type local:NativeGlassSwitch}">
-                    <Border Background="Transparent" Padding="0,0,74,0">
+                    <Border Background="Transparent" Padding="0,0,60,0">
                         <ContentPresenter VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>

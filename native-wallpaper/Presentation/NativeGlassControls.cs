@@ -42,7 +42,10 @@ internal sealed class NativeGlassButton : Fluent.Button, INativeGlassControl
 
 internal sealed class NativeGlassSwitch : Primitives.ToggleButton, INativeGlassControl
 {
-    private readonly GlassGesture gesture = new(1.5);
+    private const float TrackWidth = 48, TrackHeight = 20, ThumbInset = 1;
+    private const float ThumbWidth = 26, ThumbHeight = TrackHeight - 2 * ThumbInset;
+    private const float ThumbTravel = TrackWidth - ThumbWidth - 2 * ThumbInset;
+    private readonly GlassGesture gesture = new(1.18);
     private W.Point down;
     private bool moving, dragging, ending;
     private double start;
@@ -78,7 +81,7 @@ internal sealed class NativeGlassSwitch : Primitives.ToggleButton, INativeGlassC
         double delta = e.GetPosition(this).X - down.X;
         if (!moving && Math.Abs(delta) < W.SystemParameters.MinimumHorizontalDragDistance) return;
         moving = true;
-        gesture.Move(Math.Clamp(start + delta / 20, 0, 1));
+        gesture.Move(Math.Clamp(start + delta / ThumbTravel, 0, 1));
         GlassInput.Invalidate(this);
         e.Handled = true;
     }
@@ -115,29 +118,31 @@ internal sealed class NativeGlassSwitch : Primitives.ToggleButton, INativeGlassC
         bool active = gesture.Advance(elapsed);
         float position = (float)Math.Clamp(gesture.Position, 0, 1);
         float p = gesture.Press;
-        double cy = bounds.Top + bounds.Height / 2, x = bounds.Right - 64;
+        double cy = bounds.Top + bounds.Height / 2, x = bounds.Right - TrackWidth;
         float opacity = IsEnabled ? 1 : .45f;
         var color = Vector4.Lerp(GlassInput.Well, GlassInput.Accent, position);
         color.W *= opacity;
-        frame.Shape(frame.Paint, new(x, cy - 14, 64, 28), clip, color, 14);
-        // LiquidToggle uses a 40 × 24dp knob over a 64 × 28dp track, with 20dp of travel.
-        double knob = x + 22 + 20 * position;
+        frame.Shape(frame.Paint, new(x, cy - TrackHeight / 2, TrackWidth, TrackHeight), clip, color, TrackHeight / 2);
+        double knob = x + ThumbInset + ThumbWidth / 2 + ThumbTravel * position;
         float trackScale = (2f + .25f * p) / 3;
-        frame.Shape(frame.Lenses, GlassInput.Centered(knob, cy, 40, 24), clip,
-            new(1, 1, 1, (1 - p) * opacity), 12, new(5 * p, -10 * p, 8 * (1 - p)),
-            new(gesture.ScaleX(50), gesture.ScaleY(50), p * .17f, 0), new(4 * p, .15f * p, 4, .05f),
-            new(0, 0, 1, 0), new((float)(knob + (x + 32 - knob) * trackScale), (float)cy, 32 * trackScale, 10.5f * p), color);
+        float sampleCenter = (float)(knob + (x + TrackWidth / 2 - knob) * trackScale);
+        frame.Shape(frame.Lenses, GlassInput.Centered(knob, cy, ThumbWidth, ThumbHeight), clip,
+            new(1, 1, 1, (1 - p) * opacity), ThumbHeight / 2, new(3 * p, -6 * p, 6 * (1 - p)),
+            new(gesture.ScaleX(50), gesture.ScaleY(50), p * .17f, 0), new(3 * p, .15f * p, 3, .05f),
+            new(0, 0, 1, 0), new(sampleCenter, (float)cy, TrackWidth / 2 * trackScale, TrackHeight * .375f * p), color);
         return active;
     }
 }
 
 internal sealed class NativeGlassSlider : Ui.Slider, INativeGlassControl
 {
-    private readonly GlassGesture gesture = new(1.5);
+    private const float ThumbWidth = 30, ThumbHeight = 18;
+    private const double TrackInset = 20;
+    private readonly GlassGesture gesture = new(1.3);
     private bool dragging;
     private double offset;
     private double Fraction => Maximum > Minimum ? (Value - Minimum) / (Maximum - Minimum) : 0;
-    private double Travel => Math.Max(1, ActualWidth - 40);
+    private double Travel => Math.Max(1, ActualWidth - 2 * TrackInset);
 
     protected override void OnValueChanged(double oldValue, double newValue)
     {
@@ -153,8 +158,8 @@ internal sealed class NativeGlassSlider : Ui.Slider, INativeGlassControl
         if (!CaptureMouse()) return;
         dragging = true;
         double x = e.GetPosition(this).X;
-        double center = 20 + Travel * gesture.Position;
-        offset = Math.Abs(x - center) <= 20 ? x - center : 0;
+        double center = TrackInset + Travel * Math.Clamp(gesture.Position, 0, 1);
+        offset = Math.Abs(x - center) <= ThumbWidth / 2 ? x - center : 0;
         gesture.Begin();
         SetPointer(x);
         e.Handled = true;
@@ -183,7 +188,7 @@ internal sealed class NativeGlassSlider : Ui.Slider, INativeGlassControl
 
     private void SetPointer(double x)
     {
-        double fraction = Math.Clamp((x - offset - 20) / Travel, 0, 1);
+        double fraction = Math.Clamp((x - offset - TrackInset) / Travel, 0, 1);
         double value = Minimum + (Maximum - Minimum) * fraction;
         if (IsSnapToTickEnabled && TickFrequency > 0)
             value = fraction == 1 ? Maximum : Math.Clamp(Minimum + Math.Round((value - Minimum) / TickFrequency) * TickFrequency, Minimum, Maximum);
@@ -205,12 +210,12 @@ internal sealed class NativeGlassSlider : Ui.Slider, INativeGlassControl
         if (!dragging) gesture.Set(Fraction);
         bool active = gesture.Advance(elapsed);
         double y = bounds.Top + bounds.Height / 2;
-        double x = bounds.Left + 20 + Travel * Math.Clamp(gesture.Position, 0, 1);
+        double x = bounds.Left + TrackInset + Travel * Math.Clamp(gesture.Position, 0, 1);
         float p = gesture.Press;
         frame.Shape(frame.Paint, new(bounds.Left + 10, y - 3, Math.Max(1, bounds.Width - 20), 6), clip, GlassInput.Well, 3);
         frame.Shape(frame.Paint, new(bounds.Left + 10, y - 3, x - bounds.Left - 10, 6), clip, GlassInput.Accent, 3);
-        frame.Shape(frame.Lenses, GlassInput.Centered(x, y, 40, 24), clip, new(1, 1, 1, 1 - p), 12,
-            new(10 * p, -14 * p, 8 * (1 - p)), new(gesture.ScaleX(10), gesture.ScaleY(10), .18f * p, 0),
+        frame.Shape(frame.Lenses, GlassInput.Centered(x, y, ThumbWidth, ThumbHeight), clip, new(1, 1, 1, 1 - p), ThumbHeight / 2,
+            new(8 * p, -11 * p, 6 * (1 - p)), new(gesture.ScaleX(10), gesture.ScaleY(10), .18f * p, 0),
             new(4 * p, .3f * p, 4, .05f), new((2 + p) / 3, p, 2, 0));
         return active;
     }
