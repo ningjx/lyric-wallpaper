@@ -8,7 +8,8 @@ internal sealed class PlaybackArbiter(string[] priority, TimeSpan maxAge)
 
     public void Update(string source, PlayerSnapshot? snapshot, long now)
     {
-        if (snapshot is not { Duration: > 0 } || string.IsNullOrWhiteSpace(snapshot.Song))
+        if (snapshot is null || string.IsNullOrWhiteSpace(snapshot.Song) || snapshot.Duration is <= 0 ||
+            !double.IsFinite(snapshot.Position) || snapshot.Position < 0)
         {
             observations.Remove(source);
             return;
@@ -16,7 +17,8 @@ internal sealed class PlaybackArbiter(string[] priority, TimeSpan maxAge)
         long transition = now;
         if (observations.TryGetValue(source, out var previous) && previous.Snapshot is { } old
             && old.Playing == snapshot.Playing && old.Song == snapshot.Song && old.Author == snapshot.Author
-            && Math.Round(old.Duration, 1) == Math.Round(snapshot.Duration, 1))
+            && (old.Duration is not double before || snapshot.Duration is not double after ||
+                Math.Round(before, 1) == Math.Round(after, 1)))
             transition = previous.Transition;
         int rank = Array.IndexOf(priority, source);
         observations[source] = new(snapshot, now, transition, rank < 0 ? 1 : rank);

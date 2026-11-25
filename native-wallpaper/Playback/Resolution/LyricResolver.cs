@@ -21,7 +21,11 @@ internal sealed class LyricResolver(ServiceOptions options, LyricHttp http, Acti
     private readonly ConcurrentDictionary<SongKey, long> misses = new();
     private readonly ConcurrentDictionary<string, long> cooldowns = new();
 
-    public async Task<LyricsResult?> ResolveAsync(string title, string artist, CancellationToken stop)
+    internal TimeSpan MissRetryDelay => TimeSpan.FromSeconds(
+        ServiceOptions.Seconds(options.Netease.SearchNegativeTtl, .05, 86400, 15));
+
+    public async Task<LyricsResult?> ResolveAsync(string title, string artist, CancellationToken stop,
+        Action<LyricsResult>? onAvailable = null)
     {
         SongKey song = SongKey.Normalize(title, artist);
         if (cache.Get(song) is { } previous) return previous;
@@ -34,9 +38,12 @@ internal sealed class LyricResolver(ServiceOptions options, LyricHttp http, Acti
         var eligible = order.Where(vendor => vendor is Local or Netease or QQ).Distinct().ToArray();
         if (eligible.Length == 0) eligible = [Local];
         LyricsResult? result = null;
+        var previewGate = new object();
+        LyricsResult? preview = null;
+        int previewRank = int.MaxValue;
         if (options.Lyrics.Parallel)
         {
-            var results = await Task.WhenAll(eligible.Select(QueryAsync));
+            var results = await Task.WhenAll(eligible.Select(QueryWithPreviewAsync));
             result = results.OfType<LyricsResult>()
                 .OrderByDescending(item => item.Similarity).ThenByDescending(item => item.Completeness()).FirstOrDefault();
         }
@@ -45,23 +52,52 @@ internal sealed class LyricResolver(ServiceOptions options, LyricHttp http, Acti
             foreach (string vendor in eligible)
             {
                 if (cancellation.IsCancellationRequested) break;
-                result = await QueryAsync(vendor);
+                result = await QueryAsync(vendor, onAvailable);
                 if (result is not null) break;
             }
         }
         stop.ThrowIfCancellationRequested();
-        if (result is not null) cache.Put(song, result);
-        else misses[song] = Expiry(15, 15);
+        if (result is not null)
+        {
+            cache.Put(song, result);
+            misses.TryRemove(song, out _);
+        }
+        else misses[song] = Environment.TickCount64 + (long)MissRetryDelay.TotalMilliseconds;
         return result;
 
-        async Task<LyricsResult?> QueryAsync(string vendor)
+        async Task<LyricsResult?> QueryWithPreviewAsync(string vendor, int rank)
+        {
+            var candidate = await QueryAsync(vendor, local => OfferPreview(local, rank));
+            OfferPreview(candidate, rank);
+            return candidate;
+        }
+
+        void OfferPreview(LyricsResult? candidate, int rank)
+        {
+            if (onAvailable is null || candidate is not { Similarity: 100 }) return;
+            lock (previewGate)
+            {
+                if (stop.IsCancellationRequested) return;
+                if (preview is not null)
+                {
+                    int completeness = candidate.Completeness().CompareTo(preview.Completeness());
+                    if (completeness < 0 || (completeness == 0 && rank > previewRank)) return;
+                    if (candidate == preview && rank == previewRank) return;
+                }
+                preview = candidate;
+                previewRank = rank;
+                onAvailable(candidate);
+            }
+        }
+
+        async Task<LyricsResult?> QueryAsync(string vendor, Action<LyricsResult>? onNamedFile)
         {
             if (cooldowns.TryGetValue(vendor, out long blocked) && blocked > Environment.TickCount64) return null;
             try
             {
                 return vendor switch
                 {
-                    Local => await ReadLocalAsync(title, artist, netease, cancellation),
+                    Local => await ReadLocalAsync(title, artist, netease, cancellation, onNamedFile),
                     Netease => await ReadNeteaseAsync(await netease.Value, artist, cancellation),
                     _ => await ReadQQAsync(await SearchAsync(QQ, title, artist, song, cancellation), artist, cancellation)
                 };
@@ -76,13 +112,15 @@ internal sealed class LyricResolver(ServiceOptions options, LyricHttp http, Acti
         }
     }
 
-    private async Task<LyricsResult?> ReadLocalAsync(string title, string artist, Lazy<Task<Match?>> search, CancellationToken stop)
+    private async Task<LyricsResult?> ReadLocalAsync(string title, string artist, Lazy<Task<Match?>> search,
+        CancellationToken stop, Action<LyricsResult>? onNamedFile)
     {
         if (!Directory.Exists(directory)) return null;
         string[] named = [$"{title.Trim()} - {artist.Trim()}.lrc", $"{title.Trim()}.lrc"];
         string? namedPath = named.Select(LocalPath).FirstOrDefault(file => file is not null);
-        var namedResult = namedPath is null ? Task.FromResult<LyricsResult?>(null) : ReadAsync(namedPath);
-        // Only wait for a network ID when the user has ID-named local files.
+        var namedResult = namedPath is null ? null : await ReadAsync(namedPath);
+        if (namedResult is not null && !stop.IsCancellationRequested) onNamedFile?.Invoke(namedResult);
+        // A matching ID file takes precedence within the local provider.
         if (Directory.EnumerateFiles(directory, "*.lrc").Any(file => Path.GetFileNameWithoutExtension(file).All(char.IsAsciiDigit)))
         {
             try
@@ -90,13 +128,13 @@ internal sealed class LyricResolver(ServiceOptions options, LyricHttp http, Acti
                 if (await search.Value is { } match && match.Id.All(char.IsAsciiDigit))
                 {
                     string? idPath = LocalPath(match.Id + ".lrc");
-                    if (idPath is not null) return await ReadAsync(idPath);
+                    if (idPath is not null) return await ReadAsync(idPath) ?? namedResult;
                 }
             }
             catch (HttpRequestException) { }
             catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
         }
-        return await namedResult;
+        return namedResult;
 
         async Task<LyricsResult?> ReadAsync(string path)
         {

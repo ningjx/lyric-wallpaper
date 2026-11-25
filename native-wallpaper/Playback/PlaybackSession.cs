@@ -52,7 +52,7 @@ internal sealed class PlaybackSession(ServiceOptions options, LyricResolver reso
         }
     }
 
-    private void Update(string source, PlayerSnapshot? snapshot)
+    internal void Update(string source, PlayerSnapshot? snapshot)
     {
         lock (gate)
         {
@@ -92,17 +92,22 @@ internal sealed class PlaybackSession(ServiceOptions options, LyricResolver reso
 
     private async Task ResolveAsync(PlaybackQuery lookup, PlayerSnapshot selected)
     {
+        var cancellation = lookup.Cancellation.Token;
         try
         {
-            var result = await resolver.ResolveAsync(selected.Song, selected.Author, lookup.Cancellation.Token);
-            lock (gate)
+            for (int attempt = 0; ; attempt++)
             {
-                if (result is null || stop.IsCancellationRequested || !ReferenceEquals(query, lookup)) return;
-                track = new(selected.Song, selected.Author, result.Lrc, result.TranslatedLyric);
-                Refresh();
+                var result = await resolver.ResolveAsync(selected.Song, selected.Author, cancellation, PublishLyrics);
+                if (result is not null)
+                {
+                    PublishLyrics(result);
+                    return;
+                }
+                if (attempt == 3) return;
+                await Task.Delay(resolver.MissRetryDelay * (1 << attempt), cancellation);
             }
         }
-        catch (OperationCanceledException) when (lookup.Cancellation.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception ex) { log($"歌词解析失败（{selected.Song} - {selected.Author}）：{ex.Message}"); }
         finally
         {
@@ -110,6 +115,17 @@ internal sealed class PlaybackSession(ServiceOptions options, LyricResolver reso
             {
                 if (ReferenceEquals(query, lookup)) query = null;
                 lookup.Cancellation.Dispose();
+            }
+        }
+
+        void PublishLyrics(LyricsResult result)
+        {
+            lock (gate)
+            {
+                if (cancellation.IsCancellationRequested || !ReferenceEquals(query, lookup) ||
+                    (track.Lyrics == result.Lrc && track.Translation == result.TranslatedLyric)) return;
+                track = new(selected.Song, selected.Author, result.Lrc, result.TranslatedLyric);
+                Refresh();
             }
         }
     }

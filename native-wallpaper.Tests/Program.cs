@@ -264,6 +264,7 @@ try
     playback.Restart();
     Require(SpinWait.SpinUntil(() => playback.Latest is { HasSong: false } next && !ReferenceEquals(next, firstSnapshot),
         TimeSpan.FromSeconds(3)), "playback configuration restart republishes state");
+    await PlaybackChecks.RunAsync(Require);
 
     var timeline = new LyricTimeline();
     var track = new PlaybackTrack("测试", "歌手", "[00:01]第一句\n[00:04]第二句", "[00:01]译文");

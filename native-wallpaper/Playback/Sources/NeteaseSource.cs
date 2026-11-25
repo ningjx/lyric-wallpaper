@@ -6,19 +6,35 @@ using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 using LyricWallpaper.Playback;
 using LyricWallpaper.Playback.Resolution;
+using Windows.Media.Control;
 
 namespace LyricWallpaper.Playback.Sources;
 
 internal sealed class NeteaseSource(MusicOptions options, string configPath, Action<string> log)
 {
-    private static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(1.5);
+    private static readonly TimeSpan AttachInterval = TimeSpan.FromSeconds(1);
     private const string ProcessName = "cloudmusic", ModuleName = "cloudmusic.dll", OffsetFile = "offsets_config.json";
     private readonly string offsetPath = Path.Combine(Path.GetDirectoryName(configPath)!, OffsetFile);
+    private MediaTrack? mediaTrack;
 
     public async Task RunAsync(Action<PlayerSnapshot?> publish, CancellationToken stop)
     {
         var interval = TimeSpan.FromSeconds(ServiceOptions.Seconds(options.NeteasePollInterval, .05, 60, .2));
-        double retry = 10;
+        using var mediaLifetime = CancellationTokenSource.CreateLinkedTokenSource(stop);
+        var media = WatchMediaAsync(interval, mediaLifetime.Token);
+        try { await WatchMemoryAsync(interval, publish, stop); }
+        finally
+        {
+            await mediaLifetime.CancelAsync();
+            await media.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+    }
+
+    private async Task WatchMemoryAsync(TimeSpan interval, Action<PlayerSnapshot?> publish, CancellationToken stop)
+    {
+        var offsets = LoadOffsets();
+        double probeRetry = 1;
         while (!stop.IsCancellationRequested)
         {
             try
@@ -26,16 +42,32 @@ internal sealed class NeteaseSource(MusicOptions options, string configPath, Act
                 using var target = FindPlayer();
                 if (target is not null)
                 {
-                    var offsets = await ResolveOffsetsAsync(target, stop);
-                    if (offsets is { } known)
+                    string version = target.Version;
+                    if (!offsets.TryGetValue(version, out var known) || !target.TryReadPosition(known, out _))
                     {
-                        retry = 10;
-                        await PollAsync(target, known, interval, publish, stop);
-                        publish(null);
-                        await Task.Delay(interval, stop);
-                        continue;
+                        bool? playing = Volatile.Read(ref mediaTrack)?.Playing;
+                        if (playing != false && await ProbeProgressAsync(target, stop) is { } discovered)
+                        {
+                            offsets[version] = discovered;
+                            known = discovered;
+                            try { LyricCache.WriteJson(offsetPath, offsets); }
+                            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                            {
+                                log("无法保存网易云偏移缓存：" + ex.Message);
+                            }
+                        }
+                        else
+                        {
+                            publish(null);
+                            // Older clients without SMTC may stay paused indefinitely.
+                            double delay = playing is null ? probeRetry : AttachInterval.TotalSeconds;
+                            probeRetry = playing is null ? Math.Min(probeRetry * 2, 10) : 1;
+                            await Task.Delay(TimeSpan.FromSeconds(delay), stop);
+                            continue;
+                        }
                     }
-                    retry = Math.Min(retry * 1.5, 60);
+                    probeRetry = 1;
+                    await PollAsync(target, known, interval, publish, stop);
                 }
             }
             catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException or UnauthorizedAccessException)
@@ -43,68 +75,137 @@ internal sealed class NeteaseSource(MusicOptions options, string configPath, Act
                 log("网易云采集将重试：" + ex.Message);
             }
             publish(null);
-            await Task.Delay(TimeSpan.FromSeconds(retry), stop);
+            await Task.Delay(AttachInterval, stop);
+        }
+    }
+
+    private async Task WatchMediaAsync(TimeSpan interval, CancellationToken stop)
+    {
+        bool unavailable = false;
+        while (!stop.IsCancellationRequested)
+        {
+            try
+            {
+                var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask(stop)
+                    .WaitAsync(TimeSpan.FromSeconds(5), stop);
+                while (!stop.IsCancellationRequested)
+                {
+                    var session = manager.GetSessions().FirstOrDefault(item =>
+                        string.Equals(item.SourceAppUserModelId, ProcessName + ".exe", StringComparison.OrdinalIgnoreCase));
+                    MediaTrack? track = null;
+                    if (session is not null)
+                    {
+                        var properties = await session.TryGetMediaPropertiesAsync().AsTask(stop)
+                            .WaitAsync(TimeSpan.FromSeconds(2), stop);
+                        var status = session.GetPlaybackInfo().PlaybackStatus;
+                        if (!string.IsNullOrWhiteSpace(properties?.Title) &&
+                            status != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed)
+                        {
+                            bool? playing = status switch
+                            {
+                                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing => true,
+                                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused or
+                                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped => false,
+                                _ => null
+                            };
+                            var timeline = session.GetTimelineProperties();
+                            double duration = (timeline.EndTime - timeline.StartTime).TotalSeconds;
+                            track = new(properties.Title.Trim(), properties.Artist?.Trim() ?? "", playing,
+                                duration > 0 ? duration : null);
+                        }
+                    }
+                    Volatile.Write(ref mediaTrack, track);
+                    unavailable = false;
+                    await Task.Delay(interval, stop);
+                }
+            }
+            catch (Exception ex) when (!stop.IsCancellationRequested)
+            {
+                Volatile.Write(ref mediaTrack, null);
+                if (!unavailable) log("网易云 SMTC 暂不可用：" + ex.Message);
+                unavailable = true;
+                await Task.Delay(TimeSpan.FromSeconds(5), stop);
+            }
         }
     }
 
     private async Task PollAsync(PlayerMemory target, PlaybackOffsets offsets, TimeSpan interval,
         Action<PlayerSnapshot?> publish, CancellationToken stop)
     {
-        string song = "", artist = "";
-        double previousDuration = -1, positionSample = 0;
+        (string Song, string Artist) windowTrack = ("", ""), previousTrack = ("", "");
+        double previousPosition = 0, positionSample = 0;
         long titleCheckedAt = 0, positionCheckedAt = 0;
-        bool playing = true;
+        bool moving = false;
         int stationary = 0;
-        while (!stop.IsCancellationRequested && target.TryReadPlayback(offsets, out double position, out double duration, out _))
+        double titleRecheck = ServiceOptions.Seconds(options.TitleRecheckInterval, .05, .5, .5);
+        while (!stop.IsCancellationRequested && target.TryReadPosition(offsets, out double position))
         {
             long now = Stopwatch.GetTimestamp();
-            var roundedDuration = Math.Round(duration, 1);
-            double titleRecheck = ServiceOptions.Seconds(options.TitleRecheckInterval, .05, 3600, 30);
-            if (song.Length == 0) titleRecheck = Math.Min(2, titleRecheck);
-            if (roundedDuration != previousDuration || Stopwatch.GetElapsedTime(titleCheckedAt, now).TotalSeconds >= titleRecheck)
+            bool restarted = position < 1 && previousPosition - position > 1;
+            var media = Volatile.Read(ref mediaTrack);
+            if (media is null && (restarted || titleCheckedAt == 0 ||
+                Stopwatch.GetElapsedTime(titleCheckedAt, now).TotalSeconds >= titleRecheck))
             {
-                (song, artist) = ReadTitle(target.Id);
-                previousDuration = roundedDuration;
+                windowTrack = ReadTitle(target.Id);
                 titleCheckedAt = now;
             }
+            if (media is not null) titleCheckedAt = 0;
+            var track = media is null ? windowTrack : (media.Song, media.Artist);
+
             double elapsed = Stopwatch.GetElapsedTime(positionCheckedAt, now).TotalSeconds;
             if (positionCheckedAt == 0 || elapsed >= .35)
             {
                 if (positionCheckedAt != 0)
                 {
-                    if (position - positionSample > elapsed * .15) { playing = true; stationary = 0; }
-                    else if (++stationary >= 2) playing = false;
+                    double delta = position - positionSample;
+                    if (Math.Abs(delta) > elapsed * 2 + .25) stationary = 0;
+                    else if (delta > elapsed * .15) { moving = true; stationary = 0; }
+                    else if (++stationary >= 2) moving = false;
                 }
                 positionSample = position;
                 positionCheckedAt = now;
             }
-            publish(song.Length == 0 || duration <= 0 ? null : new PlayerSnapshot(song, artist, duration, position, playing));
+
+            // Memory and SMTC update independently when the player starts a new track.
+            // Give the title one poll to catch up before pairing a reset with the previous lyrics.
+            if (!restarted || previousTrack != track)
+            {
+                double? duration = media?.Duration is double end && position <= end + 1 ? end : null;
+                publish(track.Song.Length == 0 ? null : new(track.Song, track.Artist, duration, position, media?.Playing ?? moving));
+                previousTrack = track;
+            }
+            previousPosition = position;
             await Task.Delay(interval, stop);
         }
     }
 
-    private async Task<PlaybackOffsets?> ResolveOffsetsAsync(PlayerMemory target, CancellationToken stop)
+    private async Task<PlaybackOffsets?> ProbeProgressAsync(PlayerMemory target, CancellationToken stop)
     {
-        var store = LoadOffsets();
-        if (store.TryGetValue(target.Version, out var cached) &&
-            target.TryReadPlayback(cached, out _, out _, out _, validating: true)) return cached;
-
-        log($"正在探测网易云 {target.Version} 的播放进度和歌曲时长。");
+        log($"正在探测网易云 {target.Version} 的播放进度。");
+        var startingTrack = Volatile.Read(ref mediaTrack);
         var before = target.ReadImage(stop);
+        long first = Stopwatch.GetTimestamp();
         await Task.Delay(ProbeInterval, stop);
         if (target.HasExited) return null;
         var after = target.ReadImage(stop);
-        var discovered = FindOffsets(before, after);
-        if (discovered is not { } offsets || !target.TryReadPlayback(offsets, out _, out _, out _, validating: true)) return null;
-        store[target.Version] = offsets;
-        try { LyricCache.WriteJson(offsetPath, store); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { log("无法保存网易云偏移缓存：" + ex.Message); }
-        return offsets;
+        long second = Stopwatch.GetTimestamp();
+        await Task.Delay(ProbeInterval, stop);
+        if (target.HasExited) return null;
+        var latestTrack = Volatile.Read(ref mediaTrack);
+        if (startingTrack is not null && latestTrack is not null &&
+            (startingTrack.Song, startingTrack.Artist) != (latestTrack.Song, latestTrack.Artist)) return null;
+        return FindProgressOffset(before, after, Stopwatch.GetElapsedTime(first, second).TotalSeconds,
+            Stopwatch.GetElapsedTime(second).TotalSeconds,
+            offsets => target.TryReadPosition(offsets, out double position) ? position : null);
     }
 
     private Dictionary<string, PlaybackOffsets> LoadOffsets()
     {
-        var values = new Dictionary<string, PlaybackOffsets> { ["3.1.28.8527"] = new(0x1D808F8, 0x1DE1038, 0x1D80900) };
+        var values = new Dictionary<string, PlaybackOffsets>
+        {
+            ["3.1.28.8527"] = new(0x1D808F8, 0x1DE1038, 0x1D80900),
+            ["3.1.44.9062"] = new(0x2196268, 0, 0x2196270)
+        };
         string legacyRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LyricWallpaper", "worker");
         try
         {
@@ -131,42 +232,35 @@ internal sealed class NeteaseSource(MusicOptions options, string configPath, Act
                 var offsets = JsonSerializer.Deserialize<Dictionary<string, PlaybackOffsets>>(File.ReadAllText(path), ServiceOptions.Json);
                 if (offsets is null) return;
                 foreach (var (version, entry) in offsets)
-                    if (entry.Progress > 0 && entry.Duration > 0 && entry.Rate > 0) values[version] = entry;
+                    if (entry.Progress > 0 && entry.Rate > 0) values[version] = entry;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
         }
     }
 
-    internal static PlaybackOffsets? FindOffsets(byte[] before, byte[] after)
+    internal static PlaybackOffsets? FindProgressOffset(byte[] before, byte[] after,
+        double firstInterval, double secondInterval, Func<PlaybackOffsets, double?> readPosition)
     {
         var previous = MemoryMarshal.Cast<byte, double>(before);
         var current = MemoryMarshal.Cast<byte, double>(after);
         int length = Math.Min(previous.Length, current.Length);
-        const int durationDistance = 0x60000 / sizeof(double), tolerance = 0x20000 / sizeof(double);
-        foreach (bool strict in new[] { true, false })
+        PlaybackOffsets? best = null;
+        double bestError = double.PositiveInfinity;
+        for (int i = 1; i + 1 < length; i++)
         {
-            bool foundProgress = false;
-            for (int i = 0; i + 1 < length; i++)
-            {
-                double progress = previous[i], delta = current[i] - progress, rate = current[i + 1];
-                if (!(progress is >= 0 and <= 3600) || !(strict
-                    ? delta is >= 2.5 and <= 3.5 && rate is >= .99 and <= 1.01
-                    : delta is >= 1.5 and <= 5.5 && Math.Abs(rate) >= .5)) continue;
-                foundProgress = true;
-                int center = i + durationDistance, best = -1, bestDistance = int.MaxValue;
-                for (int j = center - tolerance; j < Math.Min(center + tolerance, length); j++)
-                {
-                    double duration = previous[j];
-                    if (!(duration is >= 10 and <= 86400) || duration <= current[i] || !(Math.Abs(duration - current[j]) < .001)) continue;
-                    int distance = Math.Abs(j - center);
-                    if (distance >= bestDistance) continue;
-                    (best, bestDistance) = (j, distance);
-                }
-                if (best >= 0) return new(i * 8, best * 8, (i + 1) * 8);
-            }
-            if (foundProgress) break; // Match the original strict-first probe.
+            double position = previous[i], rate = current[i + 1];
+            if (!(position is >= 0 and <= 86400) || !(rate is >= .5 and <= 2) ||
+                !(Math.Abs(rate - previous[i + 1]) < .02)) continue;
+            double firstError = Math.Abs(current[i] - position - firstInterval * rate);
+            if (!(firstError <= .4) || firstError >= bestError) continue;
+            var offsets = new PlaybackOffsets(i * sizeof(double), 0, (i + 1) * sizeof(double));
+            if (readPosition(offsets) is not double last) continue;
+            double secondError = Math.Abs(last - current[i] - secondInterval * rate);
+            double error = firstError + secondError;
+            if (!(secondError <= .4) || error >= bestError) continue;
+            (best, bestError) = (offsets, error);
         }
-        return null;
+        return best;
     }
 
     internal static (string Song, string Artist)? ParseTitle(string value)
@@ -231,6 +325,9 @@ internal sealed class NeteaseSource(MusicOptions options, string configPath, Act
         finally { foreach (var process in processes) process.Dispose(); }
     }
 
+    private sealed record MediaTrack(string Song, string Artist, bool? Playing, double? Duration);
+
+    // Keep the legacy duration field when reading and writing existing offset files.
     internal readonly record struct PlaybackOffsets(int Progress, int Duration, int Rate);
 
     private sealed class PlayerMemory(int id, SafeProcessHandle handle, nint address, int length, string? version) : IDisposable
@@ -247,20 +344,19 @@ internal sealed class NeteaseSource(MusicOptions options, string configPath, Act
             return $"size_{length:x}";
         }
 
-        public bool TryReadPlayback(PlaybackOffsets offsets, out double position, out double duration, out double rate, bool validating = false)
+        public bool TryReadPosition(PlaybackOffsets offsets, out double position)
         {
-            position = duration = rate = 0;
-            Span<byte> playback = stackalloc byte[16];
-            Span<byte> value = stackalloc byte[8];
-            if (!Read(offsets.Progress, playback) || !Read(offsets.Duration, value)) return false;
-            position = BitConverter.ToDouble(playback);
-            duration = BitConverter.ToDouble(value);
-            if (offsets.Rate == offsets.Progress + 8) rate = BitConverter.ToDouble(playback[8..]);
-            else if (Read(offsets.Rate, value)) rate = BitConverter.ToDouble(value);
-            else return false;
-            if (!double.IsFinite(position) || !double.IsFinite(duration)) return false;
-            return !validating || position is >= 0 and <= 86400 && duration is >= 10 and <= 86400 &&
-                (Math.Abs(rate) < .01 || Math.Abs(rate) is >= .5 and <= 2);
+            position = 0;
+            Span<byte> positionAndRate = stackalloc byte[16];
+            Span<byte> rateBytes = positionAndRate[8..];
+            if (offsets.Rate == offsets.Progress + 8)
+            {
+                if (!Read(offsets.Progress, positionAndRate)) return false;
+            }
+            else if (!Read(offsets.Progress, positionAndRate[..8]) || !Read(offsets.Rate, rateBytes)) return false;
+            position = BitConverter.ToDouble(positionAndRate);
+            double rate = Math.Abs(BitConverter.ToDouble(rateBytes));
+            return position is >= 0 and <= 86400 && (rate < .01 || rate is >= .5 and <= 2);
         }
 
         public byte[] ReadImage(CancellationToken stop)
