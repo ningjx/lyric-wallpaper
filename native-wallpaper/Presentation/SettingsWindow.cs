@@ -386,7 +386,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
             family = picker.Font.Name;
             SetPath(font, family, "");
             QueueWallpaper(s => s with { FontFamily = family });
-        })));
+        }, showShadow: false)));
         ColorField(grid, "文字颜色", wallpaper.TextColor, wallpaper.Opacity / 100d,
             (s, color, opacity) => s with { TextColor = color, Opacity = (int)Math.Round(opacity * 100) },
             minimum: .2, wholePercent: true);
@@ -658,28 +658,20 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         Func<WallpaperSettings, int, double, WallpaperSettings> setter, double minimum = 0, double maximum = 1,
         bool wholePercent = false, Func<bool>? canEditColor = null)
     {
-        var preview = new Ui.Border { CornerRadius = new W.CornerRadius(4) };
-        var swatch = new Ui.Border
-        {
-            Width = 24, Height = 18, VerticalAlignment = W.VerticalAlignment.Center,
-            Margin = new W.Thickness(0, 0, 8, 0), Child = preview,
-            CornerRadius = new W.CornerRadius(5), BorderBrush = line, BorderThickness = new W.Thickness(1)
-        };
-        swatch.SetResourceReference(Ui.Border.BackgroundProperty, "ColorCheckerBrush");
-        var hex = new Ui.TextBlock { VerticalAlignment = W.VerticalAlignment.Center };
-        var percent = Text("", 12, muted);
-        var colorLabel = new Ui.DockPanel();
-        Ui.DockPanel.SetDock(swatch, Ui.Dock.Left);
-        colorLabel.Children.Add(swatch);
-        colorLabel.Children.Add(hex);
+        var pickColor = Button();
+        pickColor.Width = 64;
+        pickColor.HorizontalAlignment = W.HorizontalAlignment.Left;
+        W.Automation.AutomationProperties.SetName(pickColor, "选择" + label + "和不透明度");
+
         void Refresh()
         {
-            preview.Background = new Media.SolidColorBrush(ColorPickerWindow.Rgb(color)) { Opacity = opacity };
-            hex.Text = ColorPickerWindow.FormatHex(color);
-            percent.Text = ColorPickerWindow.FormatOpacity(opacity);
+            var rgb = ColorPickerWindow.Rgb(color);
+            pickColor.SwatchColor = new System.Numerics.Vector4(rgb.R / 255f, rgb.G / 255f, rgb.B / 255f, (float)opacity);
+            W.Automation.AutomationProperties.SetItemStatus(pickColor,
+                $"{ColorPickerWindow.FormatHex(color)} {ColorPickerWindow.FormatOpacity(opacity)}");
         }
         Refresh();
-        var pickColor = Button(Inline(colorLabel, percent), () =>
+        pickColor.Click += (_, _) => TryAction(() =>
         {
             var picker = new ColorPickerWindow(label, color, opacity, minimum, maximum, canEditColor?.Invoke() ?? true, wholePercent)
             {
@@ -691,8 +683,6 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
             Refresh();
             QueueWallpaper(s => setter(s, selected.Color, selected.Opacity));
         });
-        pickColor.HorizontalContentAlignment = W.HorizontalAlignment.Stretch;
-        W.Automation.AutomationProperties.SetName(pickColor, "选择" + label + "和不透明度");
         AddField(grid, label, pickColor);
     }
 
@@ -763,13 +753,14 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
     private NativeGlassSwitch Check(string label, bool value) =>
         new() { Content = label, IsChecked = value, Style = (W.Style)FindResource("NativeSwitch") };
 
-    private Ui.Button Button(object content, Action action)
+    private NativeGlassButton Button(object? content = null, Action? action = null, bool showShadow = true)
     {
         var button = new NativeGlassButton
         {
-            Content = content, Style = (W.Style)FindResource("NativeAction"), MinHeight = ControlHeight, MinWidth = 52
+            Content = content, Style = (W.Style)FindResource("NativeAction"), MinHeight = ControlHeight, MinWidth = 52,
+            ShowShadow = showShadow
         };
-        button.Click += (_, _) => TryAction(action);
+        if (action is not null) button.Click += (_, _) => TryAction(action);
         return button;
     }
 

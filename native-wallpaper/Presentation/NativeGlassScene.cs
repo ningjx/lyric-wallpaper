@@ -15,7 +15,7 @@ internal interface INativeGlassControl
     bool Compose(GlassFrame frame, W.Rect bounds, W.Rect clip, double elapsed);
 }
 
-internal readonly record struct GlassLabel(string Text, W.Rect Bounds, W.Rect Clip, double Size, string? Icon = null);
+internal readonly record struct GlassLabel(string Text, W.Rect Bounds, W.Rect Clip, double Size, string? Icon = null, bool IsSelected = false);
 
 internal sealed class GlassFrame(float dpi)
 {
@@ -194,9 +194,10 @@ internal sealed class NativeGlassScene : IDisposable
     {
         var visual = new Media.DrawingVisual();
         var ink = new Media.SolidColorBrush(Media.Color.FromRgb(32, 46, 63));
+        var selectedInk = new Media.SolidColorBrush(Media.Color.FromRgb(0, 84, 163));
         using (var dc = visual.RenderOpen())
         {
-            foreach (var label in frame.Labels) DrawLabel(dc, label, ink);
+            foreach (var label in frame.Labels) DrawLabel(dc, label, label.IsSelected ? selectedInk : ink);
         }
         var bitmap = new Imaging.RenderTargetBitmap(width, height, 96, 96, Media.PixelFormats.Pbgra32);
         bitmap.Render(visual);

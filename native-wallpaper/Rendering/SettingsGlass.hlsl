@@ -129,14 +129,25 @@ float4 Lens(float4 p : SV_Position) : SV_Target
     if (coverage == 0) discard;
 
     float2 normal = Gradient(local, Bounds.zw, min(Optics.x * 1.5, min(Bounds.z, Bounds.w)));
-    float rim = saturate(1 + min(dist, 0) / max(.001, Optics.y));
-    // AGSL circleMap, evaluated in the original lens profile before the layer is stretched.
-    float bend = 1 - sqrt(saturate(1 - rim * rim));
-    float2 offset = normal * bend * Optics.z * Shape.xy;
-    float2 samplePixel = p.xy + offset;
-    float2 spread = offset * (local.x * local.y / max(1, Bounds.z * Bounds.w));
-    float4 glass = Shape.w > 0 && dot(spread, spread) > .0025
-        ? Spectral(samplePixel, spread) : SampleGlass(samplePixel, Optics.w);
+    float4 glass;
+    if (Sampling.z == 3)
+    {
+        float2 cell = floor((local + Bounds.zw) / (5 * View.z));
+        float parity = frac((cell.x + cell.y) * .5) * 2;
+        float3 checker = lerp(float3(252, 253, 254), float3(220, 226, 233), parity) / 255;
+        glass = float4(checker, 1);
+    }
+    else
+    {
+        float rim = saturate(1 + min(dist, 0) / max(.001, Optics.y));
+        // AGSL circleMap, evaluated in the original lens profile before the layer is stretched.
+        float bend = 1 - sqrt(saturate(1 - rim * rim));
+        float2 offset = normal * bend * Optics.z * Shape.xy;
+        float2 samplePixel = p.xy + offset;
+        float2 spread = offset * (local.x * local.y / max(1, Bounds.z * Bounds.w));
+        glass = Shape.w > 0 && dot(spread, spread) > .0025
+            ? Spectral(samplePixel, spread) : SampleGlass(samplePixel, Optics.w);
+    }
     // The tab labels and slider track are already in the source under the moving lens.
     glass = AlphaOver(float4(Surface.rgb * Surface.a, Surface.a), glass);
     if (Shadow.x > 0 && Shadow.y > 0)

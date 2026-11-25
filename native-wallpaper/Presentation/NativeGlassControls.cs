@@ -21,6 +21,20 @@ internal static class GlassInput
 internal sealed class NativeGlassButton : Fluent.Button, INativeGlassControl
 {
     private GlassSpring press = new(0);
+    private Vector4? swatchColor;
+
+    public bool ShowShadow { get; init; } = true;
+
+    public Vector4? SwatchColor
+    {
+        get => swatchColor;
+        set
+        {
+            if (swatchColor == value) return;
+            swatchColor = value;
+            GlassInput.Invalidate(this);
+        }
+    }
 
     protected override void OnPropertyChanged(W.DependencyPropertyChangedEventArgs e)
     {
@@ -33,9 +47,11 @@ internal sealed class NativeGlassButton : Fluent.Button, INativeGlassControl
         bool active = press.Step(IsPressed ? 1 : 0, elapsed, 300, .5);
         float progress = (float)Math.Clamp(press.Position, 0, 1);
         float scale = 1 + .055f * progress;
-        var surface = new Vector4(1, 1, 1, IsEnabled ? .30f : .16f);
+        var surface = swatchColor ?? new Vector4(1, 1, 1, IsEnabled ? .30f : .16f);
+        Vector4 shadow = ShowShadow && !swatchColor.HasValue ? new(0, 0, 24, .10f) : default;
+        Vector4 sampling = swatchColor.HasValue ? new(0, 0, 3, 0) : default;
         frame.Shape(frame.Lenses, bounds, clip, surface, (float)bounds.Height / 2, new(12, -24, 2),
-            new(scale, scale, .5f, 0), new(0, 0, 24, .10f));
+            new(scale, scale, .5f, 0), shadow, sampling);
         return active;
     }
 }
@@ -224,7 +240,8 @@ internal sealed class NativeGlassSlider : Ui.Slider, INativeGlassControl
 internal sealed class NativeGlassSelector(bool navigation) : Ui.ListBox, INativeGlassControl
 {
     public const double Inset = 4;
-    private readonly GlassGesture gesture = new(navigation ? 1.10 : 1.2);
+    // LiquidBottomTabs expands its 56dp indicator to 78dp while pressed.
+    private readonly GlassGesture gesture = new(navigation ? 1.10 : 78d / 56);
     private bool dragging;
     private bool moved;
     private double startPosition, startFraction;
@@ -320,29 +337,38 @@ internal sealed class NativeGlassSelector(bool navigation) : Ui.ListBox, INative
         bool active = gesture.Advance(elapsed);
         float p = gesture.Press;
         var track = bounds;
-        track.Inflate(-Inset, -Inset);
+        track.Inflate(-Inset, navigation ? -Inset : -bounds.Height / 16);
         double cellLength = (navigation ? track.Height : track.Width) / Items.Count;
         float opticsScale = Math.Min(1, (float)(navigation ? cellLength + 2 * Inset : bounds.Height) / 64);
         if (!navigation)
         {
-            float scale = 1 + 16 * p / (float)bounds.Width;
-            frame.Shape(frame.Docks, bounds, clip, new(1, 1, 1, .10f), (float)bounds.Height / 2,
-                new(24 * opticsScale, -24 * opticsScale, 8 * opticsScale), new(scale, scale, .32f, 0),
-                new(0, 0, 4, .09f));
+            frame.Shape(frame.Docks, bounds, clip, new(1, 1, 1, .35f), (float)bounds.Height / 2,
+                new(24 * opticsScale, -24 * opticsScale, 8 * opticsScale), new(1, 1, .80f, 0));
         }
         for (int i = 0; i < Items.Count; i++)
         {
             string label = Items[i] is Ui.ListBoxItem item ? item.Content?.ToString() ?? "" : Items[i]?.ToString() ?? "";
             string? icon = navigation && Items[i] is Ui.ListBoxItem { Tag: string glyph } ? glyph : null;
-            frame.Labels.Add(new(label, CellBounds(track, cellLength, i), clip, 12.5, icon));
+            frame.Labels.Add(new(label, CellBounds(track, cellLength, i), clip, 12.5, icon, IsSelected: !navigation && i == SelectedIndex));
         }
         double selected = Math.Clamp(gesture.Position, 0, 1) * (Items.Count - 1);
         var indicator = CellBounds(track, cellLength, selected);
         float lensScaleX = gesture.ScaleX(10), lensScaleY = gesture.ScaleY(10);
         if (navigation) (lensScaleX, lensScaleY) = (lensScaleY, lensScaleX);
+        else
+        {
+            // Use the page gutters for the expanded lens while retaining vertical scroll clipping.
+            clip.Inflate(12, 0);
+            double centerX = indicator.Left + indicator.Width / 2;
+            double available = Math.Min(centerX - clip.Left, clip.Right - centerX);
+            lensScaleX = Math.Min(lensScaleX, (float)Math.Max(1, 2 * (available - .5) / indicator.Width));
+        }
+        float refractionHeight = 10 * p * opticsScale;
+        // The wider rim and shallower offset keep the track outline in the lens across several pixels.
+        float refractionAmount = (navigation ? -14 : -8) * p * opticsScale;
+        Vector4 shadow = navigation ? new(8 * p * opticsScale, .30f * p, 4, .12f * p) : default;
         frame.Shape(frame.Lenses, indicator, clip, new(0, 0, 0, .10f - .07f * p), (float)indicator.Height / 2,
-            new(10 * p * opticsScale, -14 * p * opticsScale, 0), new(lensScaleX, lensScaleY, .50f * p, 1),
-            new(8 * p * opticsScale, .30f * p, 4, .12f * p));
+            new(refractionHeight, refractionAmount, 0), new(lensScaleX, lensScaleY, (navigation ? .50f : .80f) * p, navigation ? 1 : 0), shadow);
         return active;
     }
 
