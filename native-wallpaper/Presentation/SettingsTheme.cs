@@ -10,7 +10,7 @@ internal static class SettingsTheme
     public static readonly Media.FontFamily FontFamily = new("Segoe UI, Microsoft YaHei UI");
     public const double FontSize = 13;
 
-    public static void Apply(W.FrameworkElement element)
+    public static void Apply(W.FrameworkElement element, bool glassControls = false)
     {
         element.Resources.MergedDictionaries.Add(new ThemesDictionary { Theme = ApplicationTheme.Light });
         element.Resources.MergedDictionaries.Add(new ControlsDictionary());
@@ -18,6 +18,11 @@ internal static class SettingsTheme
         {
             Source = new Uri("/NativeWallpaper;component/Presentation/SettingsStyles.xaml", UriKind.Relative)
         });
+        if (glassControls)
+            element.Resources.MergedDictionaries.Add(new W.ResourceDictionary
+            {
+                Source = new Uri("/NativeWallpaper;component/Presentation/NativeGlassInput.xaml", UriKind.Relative)
+            });
         element.Resources["ControlCornerRadius"] = new W.CornerRadius(6);
         // Keep WPF UI's checked track visible when window-local theme resources are used.
         var checkedTrack = element.FindResource("ToggleSwitchFillOn");

@@ -4,6 +4,8 @@
     <!-- These templates provide layout, hit targets, and keyboard focus. The visible glass is drawn by D3D11. -->
     <Style x:Key="NativeAction" TargetType="{x:Type local:NativeGlassButton}">
         <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="MinWidth" Value="64" />
+        <Setter Property="MinHeight" Value="32" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
         <Setter Property="Padding" Value="11,4" />
         <Setter Property="FocusVisualStyle" Value="{DynamicResource DefaultControlFocusVisualStyle}" />
@@ -16,6 +18,18 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+        <Style.Triggers>
+            <MultiTrigger>
+                <MultiTrigger.Conditions>
+                    <Condition Property="IsAccent" Value="True" />
+                    <Condition Property="IsEnabled" Value="True" />
+                </MultiTrigger.Conditions>
+                <Setter Property="Foreground" Value="White" />
+            </MultiTrigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <Style x:Key="NativeSwitch" TargetType="{x:Type local:NativeGlassSwitch}">

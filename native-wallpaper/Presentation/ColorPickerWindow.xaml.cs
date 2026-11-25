@@ -7,8 +7,9 @@ using Fluent = Wpf.Ui.Controls;
 
 namespace LyricWallpaper.Presentation;
 
-internal sealed partial class ColorPickerWindow : Fluent.FluentWindow
+internal sealed partial class ColorPickerWindow : Fluent.FluentWindow, INativeGlassHost
 {
+    private readonly NativeGlassScene glassScene;
     private readonly Media.SolidColorBrush hueBrush = new();
     private readonly Media.SolidColorBrush previewBrush = new();
     private readonly Media.GradientStop lowerOpacity = new() { Offset = 0 };
@@ -26,7 +27,7 @@ internal sealed partial class ColorPickerWindow : Fluent.FluentWindow
         bool canEditColor, bool wholePercent)
     {
         InitializeComponent();
-        SettingsTheme.Apply(this);
+        SettingsTheme.Apply(this, glassControls: true);
         FontFamily = SettingsTheme.FontFamily;
         FontSize = SettingsTheme.FontSize;
         Title = PickerTitle.Title = title;
@@ -90,7 +91,10 @@ internal sealed partial class ColorPickerWindow : Fluent.FluentWindow
         };
         HexInput.TextChanged += (_, _) => ReadHex();
         OpacityInput.TextChanged += (_, _) => ReadOpacity();
+        glassScene = new(this, (W.FrameworkElement)Content);
     }
+
+    public void InvalidateGlass() => glassScene?.Invalidate();
 
     private void ColorFromPoint(W.Point point)
     {

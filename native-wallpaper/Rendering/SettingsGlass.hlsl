@@ -17,11 +17,6 @@ cbuffer Settings : register(b0)
     float4 TrackColor;
 };
 
-float4 Fullscreen(uint id : SV_VertexID) : SV_Position
-{
-    return float4(id == 1 ? 3 : -1, id == 2 ? -3 : 1, 0, 1);
-}
-
 float4 ShapeVertex(uint id : SV_VertexID) : SV_Position
 {
     static const float2 corners[6] = {
@@ -53,9 +48,12 @@ float4 Paint(float4 p : SV_Position) : SV_Target
     return float4(Surface.rgb * alpha, alpha);
 }
 
-float4 Overlay(float4 p : SV_Position) : SV_Target
+float4 Label(float4 p : SV_Position) : SV_Target
 {
-    return Source.SampleLevel(LinearClamp, p.xy / View.xy, 0);
+    float2 offset = p.xy - (Bounds.xy - Bounds.zw);
+    if (any(p.xy < Clip.xy) || any(p.xy >= Clip.zw) ||
+        any(offset < 0) || any(offset >= 2 * Bounds.zw)) discard;
+    return Source.SampleLevel(LinearClamp, (Sampling.xy + offset) * Sampling.zw, 0);
 }
 
 float4 AlphaOver(float4 foreground, float4 background)

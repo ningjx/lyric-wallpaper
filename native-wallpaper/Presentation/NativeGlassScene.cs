@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Numerics;
 using System.Windows.Interop;
 using LyricWallpaper.Rendering;
@@ -10,6 +9,11 @@ using Imaging = System.Windows.Media.Imaging;
 
 namespace LyricWallpaper.Presentation;
 
+internal interface INativeGlassHost
+{
+    void InvalidateGlass();
+}
+
 internal interface INativeGlassControl
 {
     bool Compose(GlassFrame frame, W.Rect bounds, W.Rect clip, double elapsed);
@@ -19,18 +23,14 @@ internal readonly record struct GlassLabel(string Text, W.Rect Bounds, W.Rect Cl
 
 internal sealed class GlassFrame(float dpi)
 {
-    public List<SettingsPrimitive> Docks { get; } = [];
+    public List<SettingsPrimitive> Surfaces { get; } = [];
     public List<SettingsPrimitive> Paint { get; } = [];
     public List<SettingsPrimitive> Lenses { get; } = [];
     public List<GlassLabel> Labels { get; } = [];
     public void Reset()
     {
-        Docks.Clear(); Paint.Clear(); Lenses.Clear(); Labels.Clear();
+        Surfaces.Clear(); Paint.Clear(); Lenses.Clear(); Labels.Clear();
     }
-
-    public bool Matches(GlassFrame other) =>
-        Docks.SequenceEqual(other.Docks) && Paint.SequenceEqual(other.Paint) &&
-        Lenses.SequenceEqual(other.Lenses) && Labels.SequenceEqual(other.Labels);
 
     public void Shape(List<SettingsPrimitive> target, W.Rect rect, W.Rect clip, Vector4 color, float radius,
         Vector3 optics = default, Vector4 style = default, Vector4 sampling = default,
@@ -49,31 +49,45 @@ internal sealed class GlassFrame(float dpi)
 
 internal sealed class NativeGlassScene : IDisposable
 {
+    private static readonly W.Duration NoWait = new(TimeSpan.Zero);
     private readonly W.Window owner;
     private readonly W.FrameworkElement content;
     private readonly Ui.Image image;
+    private readonly SettingsLabelAtlas labelAtlas = new();
+    private readonly List<SettingsLabel> labels = [];
     private D3DImage sharedImage = new();
     private readonly Stopwatch time = Stopwatch.StartNew();
     private D3D11Renderer.SettingsSurface? renderer;
     private Imaging.WriteableBitmap? softwareImage;
     private GlassFrame frame = new(1);
     private GlassFrame drawnFrame = new(1);
-    private byte[] pixels = [];
     private int width, height;
     private float dpi;
     private bool scheduled, closed, hasSharedSurface, needsPresent;
     private int delayedPresents;
     private double lastFrame;
 
-    public NativeGlassScene(W.Window owner, W.FrameworkElement content, Ui.Image image)
+    public NativeGlassScene(W.Window owner, W.FrameworkElement content)
     {
         this.owner = owner;
         this.content = content;
-        this.image = image;
+        image = new() { Stretch = Media.Stretch.Fill };
+        var overlay = new Ui.Canvas { IsHitTestVisible = false };
+        var canvas = new Ui.Grid { ClipToBounds = true };
+        // The GPU image follows the measured content, including in size-to-content dialogs.
+        image.SetBinding(W.FrameworkElement.WidthProperty, new W.Data.Binding(nameof(W.FrameworkElement.ActualWidth)) { Source = canvas });
+        image.SetBinding(W.FrameworkElement.HeightProperty, new W.Data.Binding(nameof(W.FrameworkElement.ActualHeight)) { Source = canvas });
+        overlay.Children.Add(image);
+        canvas.Children.Add(overlay);
+        if (ReferenceEquals(owner.Content, content)) owner.Content = null;
+        canvas.Children.Add(content);
+        owner.Content = canvas;
+
         owner.Loaded += (_, _) => Invalidate();
         owner.StateChanged += Changed;
         owner.Activated += Changed;
         owner.IsVisibleChanged += VisibilityChanged;
+        owner.Closed += (_, _) => Dispose();
         content.LayoutUpdated += Changed;
         content.AddHandler(Ui.ScrollViewer.ScrollChangedEvent, new Ui.ScrollChangedEventHandler(Scrolled), true);
         sharedImage.IsFrontBufferAvailableChanged += VisibilityChanged;
@@ -129,10 +143,13 @@ internal sealed class NativeGlassScene : IDisposable
         frame.Reset();
         bool more = Collect(content, new W.Rect(new W.Point(), content.RenderSize), elapsed);
         // A window move can raise LayoutUpdated while all window-local geometry stays the same.
-        if (resized || !frame.Matches(drawnFrame))
+        bool labelsChanged = !frame.Labels.SequenceEqual(drawnFrame.Labels);
+        bool redrawBase = resized || labelsChanged || !frame.Surfaces.SequenceEqual(drawnFrame.Surfaces) ||
+            !frame.Paint.SequenceEqual(drawnFrame.Paint);
+        if (redrawBase || !frame.Lenses.SequenceEqual(drawnFrame.Lenses))
         {
-            if (!frame.Labels.SequenceEqual(drawnFrame.Labels)) UploadLabels();
-            renderer.Draw(dpi, frame.Docks, frame.Paint, frame.Lenses);
+            if (resized || labelsChanged) labelAtlas.Layout(renderer, frame.Labels, dpi, labels);
+            renderer.Draw(dpi, frame.Surfaces, frame.Paint, frame.Lenses, labels, redrawBase);
             (frame, drawnFrame) = (drawnFrame, frame);
             needsPresent = true;
         }
@@ -143,7 +160,7 @@ internal sealed class NativeGlassScene : IDisposable
     private bool PublishFrame()
     {
         var dirty = new W.Int32Rect(0, 0, width, height);
-        if (hasSharedSurface && sharedImage.TryLock(new W.Duration(TimeSpan.FromMilliseconds(1))))
+        if (hasSharedSurface && sharedImage.TryLock(NoWait))
         {
             try
             {
@@ -156,16 +173,22 @@ internal sealed class NativeGlassScene : IDisposable
             return true;
         }
         if (hasSharedSurface && ++delayedPresents <= 2) return false;
-        // The GPU frame remains current even when DWM skips an occluded shared surface.
         if (softwareImage is null)
         {
             softwareImage = new(width, height, 96, 96, Media.PixelFormats.Pbgra32, null);
-            pixels = new byte[checked(width * height * 4)];
+            renderer!.ResetReadback();
         }
-        renderer!.ReadPixels(pixels);
-        softwareImage.WritePixels(dirty, pixels, width * 4, 0);
-        if (!ReferenceEquals(image.Source, softwareImage)) image.Source = softwareImage;
-        return true;
+        renderer!.QueueReadback();
+        if (!softwareImage.TryLock(NoWait)) return false;
+        bool current, updated;
+        try
+        {
+            updated = renderer.TryReadPixels(softwareImage.BackBuffer, softwareImage.BackBufferStride, out current);
+            if (updated) softwareImage.AddDirtyRect(dirty);
+        }
+        finally { softwareImage.Unlock(); }
+        if ((updated || current) && !ReferenceEquals(image.Source, softwareImage)) image.Source = softwareImage;
+        return current;
     }
 
     private bool Collect(W.DependencyObject element, W.Rect clip, double elapsed)
@@ -189,45 +212,6 @@ internal sealed class NativeGlassScene : IDisposable
 
     private W.Rect Bounds(W.FrameworkElement element) =>
         element.TransformToAncestor(content).TransformBounds(new W.Rect(new W.Point(), element.RenderSize));
-
-    private void UploadLabels()
-    {
-        var visual = new Media.DrawingVisual();
-        var ink = new Media.SolidColorBrush(Media.Color.FromRgb(32, 46, 63));
-        var selectedInk = new Media.SolidColorBrush(Media.Color.FromRgb(0, 84, 163));
-        using (var dc = visual.RenderOpen())
-        {
-            foreach (var label in frame.Labels) DrawLabel(dc, label, label.IsSelected ? selectedInk : ink);
-        }
-        var bitmap = new Imaging.RenderTargetBitmap(width, height, 96, 96, Media.PixelFormats.Pbgra32);
-        bitmap.Render(visual);
-        var textPixels = new byte[checked(width * height * 4)];
-        bitmap.CopyPixels(textPixels, width * 4, 0);
-        renderer!.SetText(width, height, textPixels);
-    }
-
-    private void DrawLabel(Media.DrawingContext dc, GlassLabel label, Media.Brush ink)
-    {
-        var box = label.Bounds;
-        var typeface = new Media.Typeface(SettingsTheme.FontFamily, W.FontStyles.Normal, W.FontWeights.Medium, W.FontStretches.Normal);
-        var text = new Media.FormattedText(label.Text, CultureInfo.CurrentUICulture, W.FlowDirection.LeftToRight,
-            typeface, label.Size * dpi, ink, 1);
-        double centerY = (box.Top + box.Height / 2) * dpi;
-        double x = (box.Left + box.Width / 2) * dpi - text.Width / 2;
-        var clip = label.Clip;
-        dc.PushClip(new Media.RectangleGeometry(new W.Rect(clip.X * dpi, clip.Y * dpi, clip.Width * dpi, clip.Height * dpi)));
-        if (label.Icon is { } glyph)
-        {
-            var iconFont = new Media.Typeface("Segoe Fluent Icons");
-            var icon = new Media.FormattedText(glyph, CultureInfo.InvariantCulture, W.FlowDirection.LeftToRight,
-                iconFont, 16 * dpi, ink, 1);
-            double iconX = (box.Left + 14) * dpi;
-            dc.DrawText(icon, new W.Point(iconX, centerY - icon.Height / 2));
-            x = iconX + 26 * dpi;
-        }
-        dc.DrawText(text, new W.Point(x, centerY - text.Height / 2));
-        dc.Pop();
-    }
 
     private void PresentSurface()
     {
@@ -264,7 +248,6 @@ internal sealed class NativeGlassScene : IDisposable
         delayedPresents = 0;
         image.Source = null;
         softwareImage = null;
-        pixels = [];
     }
 
     private void Stop()

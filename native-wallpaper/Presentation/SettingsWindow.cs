@@ -13,7 +13,7 @@ using LyricWallpaper.Wallpaper;
 
 namespace LyricWallpaper.Presentation;
 
-internal sealed class SettingsWindow : Fluent.FluentWindow
+internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
 {
     private const double ControlHeight = 32;
     private static readonly (string Label, string Icon)[] Categories =
@@ -63,11 +63,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         this.wallpaper = wallpaper;
         this.applyWallpaper = applyWallpaper;
         this.restartWorker = restartWorker;
-        SettingsTheme.Apply(this);
-        Resources.MergedDictionaries.Add(new W.ResourceDictionary
-        {
-            Source = new Uri("/NativeWallpaper;component/Presentation/NativeGlassInput.xaml", UriKind.Relative)
-        });
+        SettingsTheme.Apply(this, glassControls: true);
         testToggle.Style = startupToggle.Style = (W.Style)FindResource("NativeSwitch");
         ink = ThemeBrush("TextFillColorPrimaryBrush");
         muted = ThemeBrush("TextFillColorSecondaryBrush");
@@ -113,22 +109,12 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
             SaveWallpaper();
             ApplyService();
         };
-        var foreground = MakeLayout();
-        var image = new Ui.Image { Stretch = Media.Stretch.Fill, IsHitTestVisible = false };
-        var canvas = new Ui.Grid { ClipToBounds = true };
-        canvas.Children.Add(image);
-        canvas.Children.Add(foreground);
-        Content = canvas;
-        glassScene = new(this, foreground, image);
-        Closed += (_, _) =>
-        {
-            IsClosed = true;
-            glassScene.Dispose();
-        };
+        glassScene = new(this, MakeLayout());
+        Closed += (_, _) => IsClosed = true;
         nav.SelectedIndex = 0;
     }
 
-    internal void InvalidateGlass() => glassScene?.Invalidate();
+    public void InvalidateGlass() => glassScene?.Invalidate();
 
     public void SetStatus(string text) => status.Text = text;
     public void SetTestMode(bool enabled) => testToggle.IsChecked = enabled;
@@ -339,11 +325,11 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
             item.Click += (_, _) => TryAction(action);
             menu.Items.Add(item);
         }
-        var select = new Fluent.DropDownButton { Content = "选择", Flyout = menu, MinHeight = ControlHeight };
+        var select = Button("选择", () => menu.IsOpen = true);
         W.Automation.AutomationProperties.SetName(select, "选择背景来源");
+        select.ContextMenu = menu;
         menu.PlacementTarget = select;
         menu.Placement = Ui.Primitives.PlacementMode.Bottom;
-        select.Click += (_, _) => menu.IsOpen = true;
 
         AddSourceAction("选择图片…", Fluent.SymbolRegular.Image24, () =>
         {
@@ -659,7 +645,6 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         bool wholePercent = false, Func<bool>? canEditColor = null)
     {
         var pickColor = Button();
-        pickColor.Width = 64;
         pickColor.HorizontalAlignment = W.HorizontalAlignment.Left;
         W.Automation.AutomationProperties.SetName(pickColor, "选择" + label + "和不透明度");
 
@@ -757,7 +742,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
     {
         var button = new NativeGlassButton
         {
-            Content = content, Style = (W.Style)FindResource("NativeAction"), MinHeight = ControlHeight, MinWidth = 52
+            Content = content, Style = (W.Style)FindResource("NativeAction")
         };
         if (action is not null) button.Click += (_, _) => TryAction(action);
         return button;

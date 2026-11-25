@@ -13,15 +13,24 @@ internal static class GlassInput
     public static readonly Vector4 Well = new(.47f, .49f, .50f, .27f);
     public static void Invalidate(W.DependencyObject element)
     {
-        if (W.Window.GetWindow(element) is SettingsWindow window) window.InvalidateGlass();
+        if (W.Window.GetWindow(element) is INativeGlassHost host) host.InvalidateGlass();
     }
     public static W.Rect Centered(double x, double y, double w, double h) => new(x - w / 2, y - h / 2, w, h);
 }
 
 internal sealed class NativeGlassButton : Fluent.Button, INativeGlassControl
 {
+    private static readonly Vector4 AccentSurface = new(0, 94 / 255f, 184 / 255f, 1);
+    public static readonly W.DependencyProperty IsAccentProperty =
+        W.DependencyProperty.Register(nameof(IsAccent), typeof(bool), typeof(NativeGlassButton), new W.PropertyMetadata(false));
     private GlassSpring press = new(0);
     private Vector4? swatchColor;
+
+    public bool IsAccent
+    {
+        get => (bool)GetValue(IsAccentProperty);
+        set => SetValue(IsAccentProperty, value);
+    }
 
     public Vector4? SwatchColor
     {
@@ -37,18 +46,26 @@ internal sealed class NativeGlassButton : Fluent.Button, INativeGlassControl
     protected override void OnPropertyChanged(W.DependencyPropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
-        if (e.Property == IsPressedProperty || e.Property == IsEnabledProperty) GlassInput.Invalidate(this);
+        if (e.Property == IsPressedProperty || e.Property == IsEnabledProperty || e.Property == IsAccentProperty)
+            GlassInput.Invalidate(this);
     }
 
     public bool Compose(GlassFrame frame, W.Rect bounds, W.Rect clip, double elapsed)
     {
         bool active = press.Step(IsPressed ? 1 : 0, elapsed, 300, .5);
         float progress = (float)Math.Clamp(press.Position, 0, 1);
-        float scale = 1 + .055f * progress;
-        var surface = swatchColor ?? new Vector4(1, 1, 1, IsEnabled ? .30f : .16f);
+        float radius = (float)bounds.Height / 2;
+        float size = (float)bounds.Height / 48;
+        var surface = swatchColor ?? (IsAccent && IsEnabled ? AccentSurface : new(1, 1, 1, IsEnabled ? .30f : .16f));
         Vector4 sampling = swatchColor.HasValue ? new(0, 0, 3, 0) : default;
-        frame.Shape(frame.Lenses, bounds, clip, surface, (float)bounds.Height / 2, new(12, -24, 2),
-            new(scale, scale, .5f, 0), sampling);
+        frame.Shape(frame.Surfaces, bounds, clip, surface, radius, style: new(1, 1, IsEnabled ? .82f : .45f, 0), sampling: sampling);
+        if (progress > .001f)
+        {
+            // LiquidButton grows by 4dp on a 48dp button. The front lens samples the face underneath.
+            float scale = 1 + (4f / 48) * progress;
+            frame.Shape(frame.Lenses, bounds, clip, Vector4.Zero, radius,
+                new(12 * size, -24 * size * progress, 2 * size), new(scale, scale, .82f * progress, 0));
+        }
         return active;
     }
 }
@@ -339,7 +356,7 @@ internal sealed class NativeGlassSelector(bool navigation) : Ui.ListBox, INative
         float opticsScale = Math.Min(1, (float)(navigation ? cellLength + 2 * Inset : bounds.Height) / 64);
         if (!navigation)
         {
-            frame.Shape(frame.Docks, bounds, clip, new(1, 1, 1, .35f), (float)bounds.Height / 2,
+            frame.Shape(frame.Surfaces, bounds, clip, new(1, 1, 1, .35f), (float)bounds.Height / 2,
                 new(24 * opticsScale, -24 * opticsScale, 8 * opticsScale), new(1, 1, .80f, 0));
         }
         for (int i = 0; i < Items.Count; i++)

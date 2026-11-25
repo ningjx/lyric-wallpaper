@@ -7,6 +7,8 @@ internal readonly record struct SettingsPrimitive(
     Vector4 Bounds, Vector4 Clip, Vector4 Surface, Vector4 Optics, Vector4 Shape,
     Vector4 Sampling = default, Vector4 Track = default, Vector4 TrackColor = default);
 
+internal readonly record struct SettingsLabel(Vector4 Bounds, Vector4 Clip, Vector4 Source);
+
 internal sealed unsafe partial class D3D11Renderer
 {
     // Settings have their own immediate context, independent of the wallpaper render thread.
@@ -26,22 +28,26 @@ internal sealed unsafe partial class D3D11Renderer
 
     internal sealed class SettingsSurface : IDisposable
     {
-        private readonly D3D11Renderer gpu = new();
-        private nint fullscreen, shapeVertex, paint, lens, overlay, text;
-        private nint baseTexture, baseTarget, baseView, output, outputTarget, presentation, staging, surface9, device9;
+        private const uint MapDoNotWait = 0x100000;
+        private const int WasStillDrawing = unchecked((int)0x887A000A);
+        [ThreadStatic] private static SettingsGraphics? sharedGraphics;
+
+        private readonly SettingsGraphics graphics;
+        private readonly Readback[] readbacks = new Readback[3];
+        private nint text, baseTexture, baseTarget, baseView, output, outputTarget, presentation, surface9, device9;
         private int width, height;
+        private ulong drawn, queued, published;
+        private bool disposed;
+        private D3D11Renderer gpu => graphics.Renderer;
         public nint Surface9 => surface9;
 
         public SettingsSurface(nint window)
         {
+            // Settings windows on the same dispatcher draw serially into their own targets.
+            graphics = sharedGraphics ??= new();
+            graphics.Users++;
             try
             {
-                byte[] shader = ReadShaderSource("SettingsGlass.hlsl");
-                fullscreen = gpu.CreateShader(shader, "Fullscreen", "vs_5_0", Device.CreateVertexShader);
-                shapeVertex = gpu.CreateShader(shader, "ShapeVertex", "vs_5_0", Device.CreateVertexShader);
-                paint = gpu.CreateShader(shader, "Paint", "ps_5_0", Device.CreatePixelShader);
-                lens = gpu.CreateShader(shader, "Lens", "ps_5_0", Device.CreatePixelShader);
-                overlay = gpu.CreateShader(shader, "Overlay", "ps_5_0", Device.CreatePixelShader);
                 try { device9 = CreateInteropDevice(window); }
                 catch (COMException) { /* Keep D3D11 rendering available to software WPF composition. */ }
             }
@@ -99,59 +105,117 @@ internal sealed unsafe partial class D3D11Renderer
             catch { ReleaseBuffers(); throw; }
         }
 
-        public void Draw(float dpi, IReadOnlyList<SettingsPrimitive> docks,
-            IReadOnlyList<SettingsPrimitive> fills, IReadOnlyList<SettingsPrimitive> controls)
+        public void Draw(float dpi, IReadOnlyList<SettingsPrimitive> surfaces,
+            IReadOnlyList<SettingsPrimitive> fills, IReadOnlyList<SettingsPrimitive> controls,
+            IReadOnlyList<SettingsLabel>? labels = null, bool redrawBase = true)
         {
             Span<Vector4> data = stackalloc Vector4[9];
             data[0] = new(width, height, dpi, 0);
             gpu.SetViewport(width, height);
             // DWM supplies the desktop acrylic. The GPU target carries only premultiplied control layers.
-            Vector4 clear = Vector4.Zero;
-            ((delegate* unmanaged[Stdcall]<nint, nint, Vector4*, void>)Slot(gpu.context, (int)Context.ClearRenderTarget))
-                (gpu.context, baseTarget, &clear);
-            gpu.SetBlend(gpu.widgetBlend);
-            DrawShapes(baseTarget, 0, lens, docks, data);
-            DrawShapes(baseTarget, 0, paint, fills, data);
-            if (text != 0) Full(baseTarget, text, overlay, data);
+            if (redrawBase)
+            {
+                Vector4 clear = Vector4.Zero;
+                ((delegate* unmanaged[Stdcall]<nint, nint, Vector4*, void>)Slot(gpu.context, (int)Context.ClearRenderTarget))
+                    (gpu.context, baseTarget, &clear);
+                gpu.SetBlend(gpu.widgetBlend);
+                DrawShapes(baseTarget, 0, graphics.Lens, surfaces, data);
+                DrawShapes(baseTarget, 0, graphics.Paint, fills, data);
+                if (labels is { Count: > 0 }) DrawLabels(labels, data);
+            }
             Copy(output, baseTexture);
             // Replace the sampled app pixels inside the lens, including their alpha.
             // Blending them over the original track would leave an unwarped duplicate.
             gpu.SetBlend(0);
-            DrawShapes(outputTarget, baseView, lens, controls, data);
+            DrawShapes(outputTarget, baseView, graphics.Lens, controls, data);
             gpu.SetTarget(0);
             Bind(0);
+            drawn++;
         }
 
         public void PresentShared()
         {
             Copy(presentation, output);
-            ((delegate* unmanaged[Stdcall]<nint, void>)Slot(gpu.context, (int)Context.Flush))(gpu.context);
+            Flush();
         }
 
-        public void ReadPixels(byte[] pixels)
+        public void ResetReadback()
         {
-            if (staging == 0)
+            queued = published = 0;
+            for (int i = 0; i < readbacks.Length; i++) readbacks[i].Frame = 0;
+        }
+
+        public void QueueReadback()
+        {
+            if (queued == drawn) return;
+            foreach (ref var readback in readbacks.AsSpan())
             {
-                var desc = Description(width, height);
-                desc.BindFlags = 0;
-                desc.Usage = 3;
-                desc.CpuAccess = 0x20000;
-                staging = gpu.CreateTexture(desc, null);
+                if (readback.Frame > published) continue;
+                if (readback.Texture == 0)
+                {
+                    var desc = Description(width, height);
+                    desc.BindFlags = 0;
+                    desc.Usage = 3;
+                    desc.CpuAccess = 0x20000;
+                    readback.Texture = gpu.CreateTexture(desc, null);
+                }
+                Copy(readback.Texture, output);
+                Flush();
+                readback.Frame = queued = drawn;
+                return;
             }
-            Copy(staging, output);
+        }
+
+        public bool TryReadPixels(nint destination, int stride, out bool current)
+        {
+            // A newer copy can run while the UI publishes a previous copy. Probe newest first
+            // so a slow compositor can catch up without displaying every intermediate frame.
+            ulong before = ulong.MaxValue;
+            while (true)
+            {
+                Readback next = default;
+                foreach (var readback in readbacks)
+                    if (readback.Frame > published && readback.Frame < before && readback.Frame > next.Frame)
+                        next = readback;
+                if (next.Texture == 0)
+                {
+                    current = published == drawn;
+                    return false;
+                }
+                if (CopyReadyPixels(next.Texture, destination, stride))
+                {
+                    published = next.Frame;
+                    current = published == drawn;
+                    QueueReadback();
+                    return true;
+                }
+                before = next.Frame;
+            }
+        }
+
+        private bool CopyReadyPixels(nint texture, nint destination, int stride)
+        {
             Subresource mapped;
-            Check(((delegate* unmanaged[Stdcall]<nint, nint, uint, uint, uint, Subresource*, int>)Slot(gpu.context, (int)Context.Map))
-                (gpu.context, staging, 0, 1, 0, &mapped), "read settings surface");
+            int result = ((delegate* unmanaged[Stdcall]<nint, nint, uint, uint, uint, Subresource*, int>)Slot(gpu.context, (int)Context.Map))
+                (gpu.context, texture, 0, 1, MapDoNotWait, &mapped);
+            if (result == WasStillDrawing) return false;
+            Check(result, "read settings surface");
             try
             {
+                int rowBytes = width * 4;
                 for (int row = 0; row < height; row++)
-                    Marshal.Copy(mapped.Memory + row * (int)mapped.RowPitch, pixels, row * width * 4, width * 4);
+                    Buffer.MemoryCopy((void*)(mapped.Memory + row * (int)mapped.RowPitch),
+                        (void*)(destination + row * stride), stride, rowBytes);
             }
             finally
             {
-                ((delegate* unmanaged[Stdcall]<nint, nint, uint, void>)Slot(gpu.context, (int)Context.Unmap))(gpu.context, staging, 0);
+                ((delegate* unmanaged[Stdcall]<nint, nint, uint, void>)Slot(gpu.context, (int)Context.Unmap))(gpu.context, texture, 0);
             }
+            return true;
         }
+
+        private void Flush() =>
+            ((delegate* unmanaged[Stdcall]<nint, void>)Slot(gpu.context, (int)Context.Flush))(gpu.context);
 
         private void DrawShapes(nint target, nint source, nint shader, IReadOnlyList<SettingsPrimitive> shapes, Span<Vector4> data)
         {
@@ -159,7 +223,7 @@ internal sealed unsafe partial class D3D11Renderer
             Bind(0);
             gpu.SetTarget(target);
             Bind(source);
-            gpu.SetShaders(shapeVertex, shader);
+            gpu.SetShaders(graphics.ShapeVertex, shader);
             foreach (var element in shapes)
             {
                 data[1] = element.Bounds;
@@ -175,14 +239,21 @@ internal sealed unsafe partial class D3D11Renderer
             }
         }
 
-        private void Full(nint target, nint source, nint shader, Span<Vector4> data)
+        private void DrawLabels(IReadOnlyList<SettingsLabel> labels, Span<Vector4> data)
         {
             Bind(0);
-            gpu.SetTarget(target);
-            Bind(source);
-            gpu.SetShaders(fullscreen, shader);
-            gpu.WriteConstants(data);
-            DrawVertices(3);
+            gpu.SetTarget(baseTarget);
+            Bind(text);
+            gpu.SetShaders(graphics.ShapeVertex, graphics.Label);
+            data[5] = new(1, 1, 0, 0);
+            foreach (var label in labels)
+            {
+                data[1] = label.Bounds;
+                data[2] = label.Clip;
+                data[6] = label.Source;
+                gpu.WriteConstants(data);
+                DrawVertices(6);
+            }
         }
 
         private void Copy(nint destination, nint source)
@@ -263,20 +334,59 @@ internal sealed unsafe partial class D3D11Renderer
 
         private void ReleaseBuffers()
         {
+            ResetReadback();
+            drawn = 0;
             gpu.SetTarget(0);
             Bind(0);
             Release(ref baseTexture); Release(ref baseTarget); Release(ref baseView);
-            Release(ref output); Release(ref outputTarget); Release(ref surface9); Release(ref presentation); Release(ref staging);
-            Release(ref text);
+            Release(ref output); Release(ref outputTarget); Release(ref surface9); Release(ref presentation);
+            foreach (ref var readback in readbacks.AsSpan()) Release(ref readback.Texture);
         }
 
         public void Dispose()
         {
-            if (gpu.context == 0) return;
+            if (disposed) return;
+            disposed = true;
             ReleaseBuffers();
-            Release(ref fullscreen); Release(ref shapeVertex); Release(ref paint);
-            Release(ref lens); Release(ref overlay); Release(ref device9);
-            gpu.Dispose();
+            Release(ref text);
+            Release(ref device9);
+            if (--graphics.Users == 0)
+            {
+                sharedGraphics = null;
+                graphics.Dispose();
+            }
+        }
+
+        private struct Readback
+        {
+            public nint Texture;
+            public ulong Frame;
+        }
+
+        private sealed class SettingsGraphics : IDisposable
+        {
+            public readonly D3D11Renderer Renderer = new();
+            public nint ShapeVertex, Paint, Lens, Label;
+            public int Users;
+
+            public SettingsGraphics()
+            {
+                try
+                {
+                    byte[] shader = ReadShaderSource("SettingsGlass.hlsl");
+                    ShapeVertex = Renderer.CreateShader(shader, "ShapeVertex", "vs_5_0", Device.CreateVertexShader);
+                    Paint = Renderer.CreateShader(shader, "Paint", "ps_5_0", Device.CreatePixelShader);
+                    Lens = Renderer.CreateShader(shader, "Lens", "ps_5_0", Device.CreatePixelShader);
+                    Label = Renderer.CreateShader(shader, "Label", "ps_5_0", Device.CreatePixelShader);
+                }
+                catch { Dispose(); throw; }
+            }
+
+            public void Dispose()
+            {
+                Release(ref ShapeVertex); Release(ref Paint); Release(ref Lens); Release(ref Label);
+                Renderer.Dispose();
+            }
         }
 
         private static void Release(ref nint pointer)
