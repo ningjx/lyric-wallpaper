@@ -328,7 +328,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
 
         var menu = new Ui.ContextMenu { FontFamily = FontFamily, FontSize = FontSize };
         SettingsTheme.Apply(menu);
-        menu.Style = (W.Style)menu.FindResource("TrayMenuStyle");
+        menu.Style = (W.Style)menu.FindResource("SettingsMenuStyle");
         var itemStyle = (W.Style)menu.FindResource("TrayMenuItemStyle");
         void AddSourceAction(string label, Fluent.SymbolRegular icon, Action action)
         {
@@ -386,7 +386,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
             family = picker.Font.Name;
             SetPath(font, family, "");
             QueueWallpaper(s => s with { FontFamily = family });
-        }, showShadow: false)));
+        })));
         ColorField(grid, "文字颜色", wallpaper.TextColor, wallpaper.Opacity / 100d,
             (s, color, opacity) => s with { TextColor = color, Opacity = (int)Math.Round(opacity * 100) },
             minimum: .2, wholePercent: true);
@@ -753,12 +753,11 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
     private NativeGlassSwitch Check(string label, bool value) =>
         new() { Content = label, IsChecked = value, Style = (W.Style)FindResource("NativeSwitch") };
 
-    private NativeGlassButton Button(object? content = null, Action? action = null, bool showShadow = true)
+    private NativeGlassButton Button(object? content = null, Action? action = null)
     {
         var button = new NativeGlassButton
         {
-            Content = content, Style = (W.Style)FindResource("NativeAction"), MinHeight = ControlHeight, MinWidth = 52,
-            ShowShadow = showShadow
+            Content = content, Style = (W.Style)FindResource("NativeAction"), MinHeight = ControlHeight, MinWidth = 52
         };
         if (action is not null) button.Click += (_, _) => TryAction(action);
         return button;

@@ -33,7 +33,7 @@ internal sealed class GlassFrame(float dpi)
         Lenses.SequenceEqual(other.Lenses) && Labels.SequenceEqual(other.Labels);
 
     public void Shape(List<SettingsPrimitive> target, W.Rect rect, W.Rect clip, Vector4 color, float radius,
-        Vector3 optics = default, Vector4 style = default, Vector4 shadow = default, Vector4 sampling = default,
+        Vector3 optics = default, Vector4 style = default, Vector4 sampling = default,
         Vector4 track = default, Vector4 trackColor = default)
     {
         if (rect.Width <= 0 || rect.Height <= 0 || clip.IsEmpty) return;
@@ -43,7 +43,7 @@ internal sealed class GlassFrame(float dpi)
             new Vector4((float)rect.X + halfX, (float)rect.Y + halfY, halfX, halfY) * dpi,
             new Vector4((float)clip.Left, (float)clip.Top, (float)clip.Right, (float)clip.Bottom) * dpi,
             color, new Vector4(MathF.Min(radius, MathF.Min(halfX, halfY)), optics.X, optics.Y, optics.Z) * dpi,
-            style, new(shadow.X * dpi, shadow.Y, shadow.Z * dpi, shadow.W), sampling, track * dpi, trackColor));
+            style, sampling, track * dpi, trackColor));
     }
 }
 

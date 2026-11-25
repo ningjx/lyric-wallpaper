@@ -12,7 +12,6 @@ cbuffer Settings : register(b0)
     float4 Surface;    // straight RGBA
     float4 Optics;     // corner radius, lens height, lens amount, local blur radius
     float4 Shape;      // XY scale, highlight, seven-path dispersion
-    float4 Shadow;     // inner radius, inner alpha, outer radius, outer alpha
     float4 Sampling;   // content scale XY, combined backdrop type, unused
     float4 Track;      // scaled track center and half-size in pixels
     float4 TrackColor;
@@ -28,7 +27,7 @@ float4 ShapeVertex(uint id : SV_VertexID) : SV_Position
     static const float2 corners[6] = {
         float2(-1,-1), float2(1,-1), float2(-1,1), float2(-1,1), float2(1,-1), float2(1,1)
     };
-    float2 p = Bounds.xy + corners[id] * (Bounds.zw * Shape.xy + Shadow.z * 3 + 2);
+    float2 p = Bounds.xy + corners[id] * (Bounds.zw * Shape.xy + 2);
     return float4(p / View.xy * float2(2,-2) + float2(-1,1), 0, 1);
 }
 
@@ -109,17 +108,6 @@ float4 Spectral(float2 pixel, float2 spread)
     return float4(r.x, g.x, b.x, max(r.y, max(g.y, b.y)));
 }
 
-float4 LensShadow(float4 p : SV_Position) : SV_Target
-{
-    if (any(p.xy < Clip.xy) || any(p.xy >= Clip.zw) || Shadow.z <= 0 || Shadow.w <= 0) discard;
-    float2 local = (p.xy - Bounds.xy) / Shape.xy;
-    float dist = Distance(local, Bounds.zw, Optics.x);
-    float coverage = saturate(.5 - dist * min(Shape.x, Shape.y));
-    float edge = max(.5, Distance(local - float2(0, Shadow.z / 6), Bounds.zw, Optics.x));
-    float outer = exp(-.5 * pow(edge / max(.5, Shadow.z), 2)) * Shadow.w * (1 - coverage);
-    return float4(0, 0, 0, outer);
-}
-
 float4 Lens(float4 p : SV_Position) : SV_Target
 {
     if (any(p.xy < Clip.xy) || any(p.xy >= Clip.zw)) discard;
@@ -150,12 +138,6 @@ float4 Lens(float4 p : SV_Position) : SV_Target
     }
     // The tab labels and slider track are already in the source under the moving lens.
     glass = AlphaOver(float4(Surface.rgb * Surface.a, Surface.a), glass);
-    if (Shadow.x > 0 && Shadow.y > 0)
-    {
-        float shifted = Distance(local - float2(0, Shadow.x), Bounds.zw, Optics.x);
-        float shade = saturate(smoothstep(-Shadow.x, Shadow.x, shifted) - smoothstep(-Shadow.x, Shadow.x, dist));
-        glass = AlphaOver(float4(0, 0, 0, shade * Shadow.y), glass);
-    }
     float highlight = Shape.z * (1 - smoothstep(0, .85 * View.z, abs(dist)));
     highlight *= .4 + .6 * abs(dot(normal, float2(.7071, -.7071)));
     glass = AlphaOver(highlight.xxxx, glass);

@@ -23,8 +23,6 @@ internal sealed class NativeGlassButton : Fluent.Button, INativeGlassControl
     private GlassSpring press = new(0);
     private Vector4? swatchColor;
 
-    public bool ShowShadow { get; init; } = true;
-
     public Vector4? SwatchColor
     {
         get => swatchColor;
@@ -48,10 +46,9 @@ internal sealed class NativeGlassButton : Fluent.Button, INativeGlassControl
         float progress = (float)Math.Clamp(press.Position, 0, 1);
         float scale = 1 + .055f * progress;
         var surface = swatchColor ?? new Vector4(1, 1, 1, IsEnabled ? .30f : .16f);
-        Vector4 shadow = ShowShadow && !swatchColor.HasValue ? new(0, 0, 24, .10f) : default;
         Vector4 sampling = swatchColor.HasValue ? new(0, 0, 3, 0) : default;
         frame.Shape(frame.Lenses, bounds, clip, surface, (float)bounds.Height / 2, new(12, -24, 2),
-            new(scale, scale, .5f, 0), shadow, sampling);
+            new(scale, scale, .5f, 0), sampling);
         return active;
     }
 }
@@ -144,8 +141,8 @@ internal sealed class NativeGlassSwitch : Primitives.ToggleButton, INativeGlassC
         float sampleCenter = (float)(knob + (x + TrackWidth / 2 - knob) * trackScale);
         frame.Shape(frame.Lenses, GlassInput.Centered(knob, cy, ThumbWidth, ThumbHeight), clip,
             new(1, 1, 1, (1 - p) * opacity), ThumbHeight / 2, new(3 * p, -6 * p, 6 * (1 - p)),
-            new(gesture.ScaleX(50), gesture.ScaleY(50), p * .17f, 0), new(3 * p, .15f * p, 3, .05f),
-            new(0, 0, 1, 0), new(sampleCenter, (float)cy, TrackWidth / 2 * trackScale, TrackHeight * .375f * p), color);
+            new(gesture.ScaleX(50), gesture.ScaleY(50), p * .17f, 0), new(0, 0, 1, 0),
+            new(sampleCenter, (float)cy, TrackWidth / 2 * trackScale, TrackHeight * .375f * p), color);
         return active;
     }
 }
@@ -232,7 +229,7 @@ internal sealed class NativeGlassSlider : Ui.Slider, INativeGlassControl
         frame.Shape(frame.Paint, new(bounds.Left + 10, y - 3, x - bounds.Left - 10, 6), clip, GlassInput.Accent, 3);
         frame.Shape(frame.Lenses, GlassInput.Centered(x, y, ThumbWidth, ThumbHeight), clip, new(1, 1, 1, 1 - p), ThumbHeight / 2,
             new(8 * p, -11 * p, 6 * (1 - p)), new(gesture.ScaleX(10), gesture.ScaleY(10), .18f * p, 0),
-            new(4 * p, .3f * p, 4, .05f), new((2 + p) / 3, p, 2, 0));
+            new((2 + p) / 3, p, 2, 0));
         return active;
     }
 }
@@ -366,9 +363,8 @@ internal sealed class NativeGlassSelector(bool navigation) : Ui.ListBox, INative
         float refractionHeight = 10 * p * opticsScale;
         // The wider rim and shallower offset keep the track outline in the lens across several pixels.
         float refractionAmount = (navigation ? -14 : -8) * p * opticsScale;
-        Vector4 shadow = navigation ? new(8 * p * opticsScale, .30f * p, 4, .12f * p) : default;
         frame.Shape(frame.Lenses, indicator, clip, new(0, 0, 0, .10f - .07f * p), (float)indicator.Height / 2,
-            new(refractionHeight, refractionAmount, 0), new(lensScaleX, lensScaleY, (navigation ? .50f : .80f) * p, navigation ? 1 : 0), shadow);
+            new(refractionHeight, refractionAmount, 0), new(lensScaleX, lensScaleY, (navigation ? .50f : .80f) * p, navigation ? 1 : 0));
         return active;
     }
 

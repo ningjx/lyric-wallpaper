@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace LyricWallpaper.Rendering;
 
 internal readonly record struct SettingsPrimitive(
-    Vector4 Bounds, Vector4 Clip, Vector4 Surface, Vector4 Optics, Vector4 Shape, Vector4 Shadow,
+    Vector4 Bounds, Vector4 Clip, Vector4 Surface, Vector4 Optics, Vector4 Shape,
     Vector4 Sampling = default, Vector4 Track = default, Vector4 TrackColor = default);
 
 internal sealed unsafe partial class D3D11Renderer
@@ -17,7 +17,7 @@ internal sealed unsafe partial class D3D11Renderer
         try
         {
             Check(D3D11CreateDevice(0, 1, 0, 0x20, null, 0, 7, out device, out _, out context), "create settings D3D11 device");
-            constants = CreateConstantBuffer(10);
+            constants = CreateConstantBuffer(9);
             CreateSharedStates();
             BindScene();
         }
@@ -27,7 +27,7 @@ internal sealed unsafe partial class D3D11Renderer
     internal sealed class SettingsSurface : IDisposable
     {
         private readonly D3D11Renderer gpu = new();
-        private nint fullscreen, shapeVertex, paint, lens, shadow, overlay, text;
+        private nint fullscreen, shapeVertex, paint, lens, overlay, text;
         private nint baseTexture, baseTarget, baseView, output, outputTarget, presentation, staging, surface9, device9;
         private int width, height;
         public nint Surface9 => surface9;
@@ -41,7 +41,6 @@ internal sealed unsafe partial class D3D11Renderer
                 shapeVertex = gpu.CreateShader(shader, "ShapeVertex", "vs_5_0", Device.CreateVertexShader);
                 paint = gpu.CreateShader(shader, "Paint", "ps_5_0", Device.CreatePixelShader);
                 lens = gpu.CreateShader(shader, "Lens", "ps_5_0", Device.CreatePixelShader);
-                shadow = gpu.CreateShader(shader, "LensShadow", "ps_5_0", Device.CreatePixelShader);
                 overlay = gpu.CreateShader(shader, "Overlay", "ps_5_0", Device.CreatePixelShader);
                 try { device9 = CreateInteropDevice(window); }
                 catch (COMException) { /* Keep D3D11 rendering available to software WPF composition. */ }
@@ -103,7 +102,7 @@ internal sealed unsafe partial class D3D11Renderer
         public void Draw(float dpi, IReadOnlyList<SettingsPrimitive> docks,
             IReadOnlyList<SettingsPrimitive> fills, IReadOnlyList<SettingsPrimitive> controls)
         {
-            Span<Vector4> data = stackalloc Vector4[10];
+            Span<Vector4> data = stackalloc Vector4[9];
             data[0] = new(width, height, dpi, 0);
             gpu.SetViewport(width, height);
             // DWM supplies the desktop acrylic. The GPU target carries only premultiplied control layers.
@@ -111,12 +110,10 @@ internal sealed unsafe partial class D3D11Renderer
             ((delegate* unmanaged[Stdcall]<nint, nint, Vector4*, void>)Slot(gpu.context, (int)Context.ClearRenderTarget))
                 (gpu.context, baseTarget, &clear);
             gpu.SetBlend(gpu.widgetBlend);
-            DrawShapes(baseTarget, 0, shadow, docks, data);
             DrawShapes(baseTarget, 0, lens, docks, data);
             DrawShapes(baseTarget, 0, paint, fills, data);
             if (text != 0) Full(baseTarget, text, overlay, data);
             Copy(output, baseTexture);
-            DrawShapes(outputTarget, 0, shadow, controls, data);
             // Replace the sampled app pixels inside the lens, including their alpha.
             // Blending them over the original track would leave an unwarped duplicate.
             gpu.SetBlend(0);
@@ -170,10 +167,9 @@ internal sealed unsafe partial class D3D11Renderer
                 data[3] = element.Surface;
                 data[4] = element.Optics;
                 data[5] = element.Shape;
-                data[6] = element.Shadow;
-                data[7] = element.Sampling;
-                data[8] = element.Track;
-                data[9] = element.TrackColor;
+                data[6] = element.Sampling;
+                data[7] = element.Track;
+                data[8] = element.TrackColor;
                 gpu.WriteConstants(data);
                 DrawVertices(6);
             }
@@ -279,7 +275,7 @@ internal sealed unsafe partial class D3D11Renderer
             if (gpu.context == 0) return;
             ReleaseBuffers();
             Release(ref fullscreen); Release(ref shapeVertex); Release(ref paint);
-            Release(ref lens); Release(ref shadow); Release(ref overlay); Release(ref device9);
+            Release(ref lens); Release(ref overlay); Release(ref device9);
             gpu.Dispose();
         }
 
