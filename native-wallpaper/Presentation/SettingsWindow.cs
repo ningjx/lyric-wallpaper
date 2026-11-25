@@ -740,8 +740,10 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
             Style = (W.Style)FindResource("NativeSlider"),
             SmallChange = step, LargeChange = step * 5, IsSnapToTickEnabled = true,
             VerticalAlignment = W.VerticalAlignment.Center, Margin = new W.Thickness(0, 0, 9, 0) };
-        var input = new Fluent.TextBox { Width = 74, MinHeight = ControlHeight, FontFamily = new Media.FontFamily("Cascadia Mono, Consolas"), Text = initial.ToString(CultureInfo.InvariantCulture),
-            TextAlignment = W.TextAlignment.Right };
+        var input = new Ui.TextBox
+        {
+            Style = (W.Style)FindResource("NativeNumericInput"), Text = initial.ToString(CultureInfo.InvariantCulture)
+        };
         W.Automation.AutomationProperties.SetName(slider, label);
         W.Automation.AutomationProperties.SetName(input, label + " 数值");
         slider.DragCompleted += dragCompleted;

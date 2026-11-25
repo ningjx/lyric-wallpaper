@@ -66,6 +66,51 @@
         </Setter>
     </Style>
 
+    <Style x:Key="NativeNumericInput" TargetType="TextBox">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="Width" Value="60" />
+        <Setter Property="MinHeight" Value="28" />
+        <Setter Property="Padding" Value="8,0" />
+        <Setter Property="TextAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Typography.NumeralAlignment" Value="Tabular" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="CaretBrush" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="Background" Value="#48FFFFFF" />
+        <Setter Property="BorderBrush" Value="#1C172C40" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border Background="Transparent">
+                        <Border Margin="0,2" CornerRadius="12" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                                SnapsToDevicePixels="True">
+                            <!-- The font's digit ink sits below the center of its line box. -->
+                            <ScrollViewer x:Name="PART_ContentHost" Style="{x:Null}" Focusable="False"
+                                          Margin="0,0,0,3" BorderThickness="0"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" />
+                        </Border>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="#70FFFFFF" />
+            </Trigger>
+            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                <Setter Property="Background" Value="#A6FFFFFF" />
+                <Setter Property="BorderBrush" Value="#0067C0" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorDisabledBrush}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
     <Style x:Key="NativeChoiceItem" TargetType="ListBoxItem">
         <Setter Property="OverridesDefaultStyle" Value="True" />
         <Setter Property="IsTabStop" Value="False" />
