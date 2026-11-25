@@ -173,6 +173,8 @@ internal sealed class NativeGlassSlider : Ui.Slider, INativeGlassControl
     private double offset;
     private double Fraction => Maximum > Minimum ? (Value - Minimum) / (Maximum - Minimum) : 0;
     private double Travel => Math.Max(1, ActualWidth - 2 * TrackInset);
+    public bool IsDragging => dragging;
+    public event Action? DragCompleted;
 
     protected override void OnValueChanged(double oldValue, double newValue)
     {
@@ -233,6 +235,7 @@ internal sealed class NativeGlassSlider : Ui.Slider, INativeGlassControl
         if (IsMouseCaptured) ReleaseMouseCapture();
         gesture.End(Fraction);
         GlassInput.Invalidate(this);
+        DragCompleted?.Invoke();
     }
 
     public bool Compose(GlassFrame frame, W.Rect bounds, W.Rect clip, double elapsed)

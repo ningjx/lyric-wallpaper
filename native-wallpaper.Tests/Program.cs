@@ -96,6 +96,26 @@ try
     var bounds = new SceneViewport(1440, 810, display).ToOutput(new(720, 405), new(75, 45));
     Require(bounds == new RectangleF(1060, 560, 200, 120), "draw and hit boxes share the DPR and monitor transform");
 
+    var settingsView = new Rectangle(0, 0, 300, 150);
+    var settingsLens = new SettingsPrimitive(new(70, 30, 20, 8), new(0, 0, 300, 150), Vector4.Zero,
+        new(8, 8, 12, 4), new(1, 1, 0, 1));
+    var clippedLens = settingsLens with { Clip = new(60, 25, 81, 34) };
+    Require(SettingsDamage.Bounds(clippedLens, settingsView) == new Rectangle(60, 25, 21, 9),
+        "settings damage clips scaled glass bounds to the scroll viewport");
+    var movedLens = settingsLens with { Bounds = new(90, 30, 20, 8) };
+    Require(SettingsDamage.Output(Rectangle.Empty, [settingsLens], [movedLens], settingsView) == new Rectangle(48, 20, 64, 20),
+        "moving a settings lens redraws the old and new positions");
+    var nearDamage = new Rectangle(96, 28, 3, 3);
+    Require(SettingsDamage.Output(nearDamage, [settingsLens], [settingsLens], settingsView).Contains(new Rectangle(48, 20, 44, 20)),
+        "settings updates refresh a stationary lens that samples changed pixels outside its bounds");
+    var farDamage = new Rectangle(220, 100, 5, 5);
+    Require(SettingsDamage.Output(farDamage, [settingsLens], [settingsLens], settingsView) == farDamage,
+        "settings updates leave a distant lens cached");
+    var settingsLabel = new SettingsLabel(new(30, 30, 12, 7), new(0, 0, 300, 150), new(0, 0, .01f, .01f));
+    Require(SettingsDamage.Changed([settingsLabel], [settingsLabel], settingsView, SettingsDamage.Bounds).IsEmpty &&
+        SettingsDamage.Changed([settingsLabel], [settingsLabel], settingsView, SettingsDamage.Bounds, all: true) ==
+        SettingsDamage.Bounds(settingsLabel, settingsView), "replacing a settings label atlas refreshes unchanged tile positions");
+
     var blurSize = GaussianBlurKernel.TargetSize(1920, 1080, 18, out int blurGrid);
     Require(blurSize == new Size(960, 540) && blurGrid == 2, "full-scene blur at 18 covers the background before filtering");
     blurSize = GaussianBlurKernel.TargetSize(7680, 4320, 144, out blurGrid);

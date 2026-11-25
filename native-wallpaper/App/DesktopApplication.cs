@@ -79,6 +79,15 @@ internal static class DesktopApplication
                 try { controls.Dispatcher.InvokeAsync(action, DispatcherPriority.Send).Task.GetAwaiter().GetResult(); }
                 catch (OperationCanceledException) when (finished.Task.IsCompleted) { }
             }
+            Task ApplyWallpaperAsync(WallpaperSettings updated)
+            {
+                if (finished.Task.IsCompleted) return Task.FromCanceled(new CancellationToken(true));
+                return controls.Dispatcher.InvokeAsync(() =>
+                {
+                    controls.ApplyAppearance(updated);
+                    Volatile.Write(ref appearance, updated);
+                }).Task;
+            }
             void ToggleEditor()
             {
                 if (editor is not null) { editor.Close(); return; }
@@ -126,12 +135,7 @@ internal static class DesktopApplication
                 }
             };
             using var desktopTray = worker is null ? null : new DesktopTray(wallpaperStore, playbackStore, worker,
-                () => appearance,
-                updated =>
-                {
-                    OnRender(() => controls.ApplyAppearance(updated));
-                    appearance = updated;
-                },
+                () => Volatile.Read(ref appearance), ApplyWallpaperAsync,
                 () => testing,
                 enabled =>
                 {

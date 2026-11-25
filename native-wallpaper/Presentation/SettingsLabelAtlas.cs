@@ -18,7 +18,7 @@ internal sealed class SettingsLabelAtlas
     private int width, height, padding;
     private float dpi;
 
-    public void Layout(D3D11Renderer.SettingsSurface renderer, List<GlassLabel> labels, float scale,
+    public bool Layout(D3D11Renderer.SettingsSurface renderer, List<GlassLabel> labels, float scale,
         List<SettingsLabel> placements)
     {
         placements.Clear();
@@ -28,11 +28,13 @@ internal sealed class SettingsLabelAtlas
             dpi = scale;
             padding = Math.Max(2, (int)Math.Ceiling(2 * dpi));
         }
-        if (labels.Count == 0) return;
+        if (labels.Count == 0) return false;
+        bool uploaded = false;
         foreach (var label in labels)
         {
             if (tiles.ContainsKey(Style.From(label))) continue;
             Upload(renderer, labels);
+            uploaded = true;
             break;
         }
         foreach (var label in labels)
@@ -50,6 +52,7 @@ internal sealed class SettingsLabelAtlas
                 new Vector4((float)clip.Left, (float)clip.Top, (float)clip.Right, (float)clip.Bottom) * dpi,
                 new(0, tile.Top, 1f / width, 1f / height)));
         }
+        return uploaded;
     }
 
     private void Upload(D3D11Renderer.SettingsSurface renderer, List<GlassLabel> labels)

@@ -16,7 +16,7 @@ internal sealed unsafe partial class D3D11Renderer : IDisposable
         PSSetSamplers = 10, VSSetShader = 11, Draw = 13, Map = 14, Unmap = 15, PSSetConstantBuffers = 16, DrawInstanced = 21,
         VSSetShaderResources = 25, VSSetSamplers = 26,
         IASetPrimitiveTopology = 24, OMSetRenderTargets = 33, OMSetBlendState = 35, RSSetViewports = 44,
-        CopyResource = 47, UpdateSubresource = 48, ClearRenderTarget = 50, GenerateMips = 54, Flush = 111 }
+        CopySubresourceRegion = 46, CopyResource = 47, UpdateSubresource = 48, ClearRenderTarget = 50, GenerateMips = 54, Flush = 111 }
     private enum SwapChain { Present = 8, GetBuffer = 9, ResizeBuffers = 13 }
     private const uint Bgra8 = 87, R8Unorm = 61;
     private const int PreviewWidth = 384, PreviewHeight = 216;

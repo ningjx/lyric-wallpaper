@@ -15,7 +15,7 @@ internal sealed class DesktopTray : IDisposable
     private readonly PlaybackSettingsStore playbackStore;
     private readonly LyricsService worker;
     private readonly Func<WallpaperSettings> currentWallpaper;
-    private readonly Action<WallpaperSettings> applyWallpaper;
+    private readonly Func<WallpaperSettings, Task> applyWallpaper;
     private readonly Func<bool> testEnabled;
     private readonly Action<bool> setTestMode;
     private readonly Icon? icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -33,12 +33,12 @@ internal sealed class DesktopTray : IDisposable
     private readonly Func<bool> widgetEditorOpen;
     private SettingsWindow? settings;
     private PlaybackSnapshot? lastSample;
-    private bool syncingStartup;
+    private bool syncingStartup, exiting;
 
     public bool ExitRequested { get; private set; }
 
     public DesktopTray(WallpaperStore wallpaperStore, PlaybackSettingsStore playbackStore, LyricsService worker, Func<WallpaperSettings> currentWallpaper,
-        Action<WallpaperSettings> applyWallpaper, Func<bool> testEnabled, Action<bool> setTestMode,
+        Func<WallpaperSettings, Task> applyWallpaper, Func<bool> testEnabled, Action<bool> setTestMode,
         Func<bool> widgetEditorOpen, Action toggleWidgetEditor)
     {
         this.wallpaperStore = wallpaperStore;
@@ -91,7 +91,7 @@ internal sealed class DesktopTray : IDisposable
         AddSeparator();
         AddAction("关于", Fluent.SymbolRegular.Info20, () => MessageBox.Show("歌词壁纸\nD3D11 桌面壁纸与本地歌词服务",
             "关于歌词壁纸", MessageBoxButtons.OK, MessageBoxIcon.Information));
-        AddAction("退出歌词壁纸", Fluent.SymbolRegular.SignOut20, () => ExitRequested = true);
+        AddAction("退出歌词壁纸", Fluent.SymbolRegular.SignOut20, RequestExit);
         tray.MouseUp += (_, e) =>
         {
             if (e.Button != MouseButtons.Right) return;
@@ -147,6 +147,7 @@ internal sealed class DesktopTray : IDisposable
 
     public void Open(bool service = false)
     {
+        if (exiting) return;
         if (settings is null || settings.IsClosed)
         {
             settings = new SettingsWindow(wallpaperStore, playbackStore, currentWallpaper(), applyWallpaper, worker.Restart, ChangeTestMode, ChangeStartup);
@@ -160,6 +161,18 @@ internal sealed class DesktopTray : IDisposable
         if (settings.WindowState == System.Windows.WindowState.Minimized)
             settings.WindowState = System.Windows.WindowState.Normal;
         settings.Activate();
+    }
+
+    private void RequestExit()
+    {
+        if (exiting) return;
+        exiting = true;
+        if (settings is { IsClosed: false } window)
+        {
+            window.Closed += (_, _) => ExitRequested = true;
+            window.CloseForExit();
+        }
+        else ExitRequested = true;
     }
 
     public void Update(PlaybackSnapshot? sample)
@@ -203,7 +216,7 @@ internal sealed class DesktopTray : IDisposable
     {
         tray.Visible = false;
         menu.IsOpen = false;
-        if (settings is { IsClosed: false }) settings.CloseForExit();
+        if (settings is { IsClosed: false }) settings.CloseForExit(flushWallpaper: false);
         editHotkey.Dispose();
         tray.Dispose();
         icon?.Dispose();

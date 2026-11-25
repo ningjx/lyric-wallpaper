@@ -15,7 +15,10 @@ namespace LyricWallpaper.Presentation;
 
 internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
 {
+    private enum SliderPreview { Live, AfterDrag, ReducedRate }
     private const double ControlHeight = 32;
+    private static readonly TimeSpan WallpaperPreviewInterval = TimeSpan.FromMilliseconds(25);
+    private static readonly TimeSpan BlurPreviewInterval = TimeSpan.FromMilliseconds(100);
     private static readonly (string Label, string Icon)[] Categories =
     [
         ("背景", "\uEB9F"),
@@ -28,7 +31,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
     private readonly Media.Brush ink, muted, line, surface, error;
     private readonly WallpaperStore wallpaperStore;
     private readonly PlaybackSettingsStore playbackStore;
-    private readonly Action<WallpaperSettings> applyWallpaper;
+    private readonly Func<WallpaperSettings, Task> applyWallpaper;
     private readonly Action restartWorker;
     private readonly Dictionary<int, W.FrameworkElement> pages = new();
     private readonly NativeGlassSelector nav = new(navigation: true);
@@ -44,19 +47,20 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
     private readonly Ui.TextBlock errorNotice = new() { Visibility = W.Visibility.Collapsed };
     private readonly NativeGlassSwitch testToggle = new() { Content = "测试滚动" };
     private readonly NativeGlassSwitch startupToggle = new() { Content = "开机自启", IsEnabled = false };
-    private readonly W.Threading.DispatcherTimer wallpaperUpdate = new() { Interval = TimeSpan.FromMilliseconds(25) };
+    private readonly W.Threading.DispatcherTimer wallpaperUpdate = new();
     private readonly W.Threading.DispatcherTimer wallpaperSave = new() { Interval = TimeSpan.FromMilliseconds(350) };
     private readonly W.Threading.DispatcherTimer serviceUpdate = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private WallpaperSettings wallpaper;
-    private WallpaperSettings? queuedWallpaper;
+    private readonly List<Func<WallpaperSettings, WallpaperSettings>> wallpaperEdits = [];
     private Func<bool>? saveService;
-    private bool wallpaperDirty, serviceDirty, exiting, syncingStartup;
+    private bool wallpaperDirty, applyingWallpaper, holdWallpaperPreview, closePending, skipWallpaperFlush;
+    private bool serviceDirty, exiting, syncingStartup;
     private W.FrameworkElement? visiblePage;
 
     public bool IsClosed { get; private set; }
 
     public SettingsWindow(WallpaperStore wallpaperStore, PlaybackSettingsStore playbackStore, WallpaperSettings wallpaper,
-        Action<WallpaperSettings> applyWallpaper, Action restartWorker, Action<bool> setTestMode, Action<bool> setStartup)
+        Func<WallpaperSettings, Task> applyWallpaper, Action restartWorker, Action<bool> setTestMode, Action<bool> setStartup)
     {
         this.wallpaperStore = wallpaperStore;
         this.playbackStore = playbackStore;
@@ -103,9 +107,16 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
         }
         startupToggle.Checked += StartupChanged;
         startupToggle.Unchecked += StartupChanged;
-        Closing += (_, _) =>
+        Closing += (_, e) =>
         {
-            ApplyQueuedWallpaper();
+            if (!skipWallpaperFlush && (applyingWallpaper || wallpaperEdits.Count != 0))
+            {
+                e.Cancel = true;
+                closePending = true;
+                ApplyQueuedWallpaper();
+                return;
+            }
+            wallpaperUpdate.Stop();
             SaveWallpaper();
             ApplyService();
         };
@@ -130,9 +141,10 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
         finally { syncingStartup = false; }
     }
 
-    public void CloseForExit()
+    public void CloseForExit(bool flushWallpaper = true)
     {
         exiting = true;
+        skipWallpaperFlush = !flushWallpaper;
         Close();
     }
 
@@ -242,26 +254,67 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
         element.BeginAnimation(OpacityProperty, animation);
     }
 
-    private void QueueWallpaper(Func<WallpaperSettings, WallpaperSettings> edit)
+    private void QueueWallpaper(Func<WallpaperSettings, WallpaperSettings> edit, SliderPreview preview = SliderPreview.Live)
     {
-        queuedWallpaper = edit(queuedWallpaper ?? wallpaper);
-        if (!wallpaperUpdate.IsEnabled) wallpaperUpdate.Start();
+        wallpaperEdits.Add(edit);
+        if (preview == SliderPreview.AfterDrag)
+        {
+            holdWallpaperPreview = true;
+            wallpaperUpdate.Stop();
+        }
+        if (holdWallpaperPreview || wallpaperUpdate.IsEnabled) return;
+        wallpaperUpdate.Interval = preview == SliderPreview.ReducedRate && wallpaper.FullSceneBlur
+            ? BlurPreviewInterval : WallpaperPreviewInterval;
+        wallpaperUpdate.Start();
+    }
+
+    private void FinishWallpaperDrag()
+    {
+        holdWallpaperPreview = false;
+        ApplyQueuedWallpaper();
     }
 
     private void ApplyQueuedWallpaper()
     {
         wallpaperUpdate.Stop();
-        var updated = queuedWallpaper?.Normalize();
-        queuedWallpaper = null;
-        if (updated is null || updated == wallpaper) return;
-        TryAction(() =>
+        if (applyingWallpaper || wallpaperEdits.Count == 0) return;
+        applyingWallpaper = true;
+        // WinForms tray callbacks can enter WPF without a Dispatcher synchronization context.
+        _ = Dispatcher.InvokeAsync(ApplyWallpaperEdits);
+    }
+
+    private async void ApplyWallpaperEdits()
+    {
+        try
         {
-            applyWallpaper(updated);
-            wallpaper = updated;
-            wallpaperDirty = true;
-            wallpaperSave.Stop();
-            wallpaperSave.Start();
-        });
+            while (!IsClosed && wallpaperEdits.Count != 0 &&
+                (closePending || !holdWallpaperPreview && !wallpaperUpdate.IsEnabled))
+            {
+                // Rebase edits made while rendering on the last successfully applied settings.
+                var updated = wallpaper;
+                foreach (var edit in wallpaperEdits) updated = edit(updated);
+                updated = updated.Normalize();
+                wallpaperEdits.Clear();
+                if (updated == wallpaper) continue;
+                try
+                {
+                    await applyWallpaper(updated);
+                    if (IsClosed) return;
+                    wallpaper = updated;
+                    wallpaperDirty = true;
+                    errorNotice.Visibility = W.Visibility.Collapsed;
+                    wallpaperSave.Stop();
+                    if (!closePending) wallpaperSave.Start();
+                }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex) when (IsSettingsError(ex)) { ShowError(ex); }
+            }
+        }
+        finally
+        {
+            applyingWallpaper = false;
+            if (closePending && !IsClosed) Close();
+        }
     }
 
     private void SaveWallpaper()
@@ -391,7 +444,8 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
         Integer(grid, "歌词提前（毫秒）", wallpaper.OffsetMs, -5000, 5000, (s, v) => s with { OffsetMs = v }, 50);
         Integer(grid, "暂停后显示时钟（秒）", wallpaper.IdleSeconds, 0, 3600, (s, v) => s with { IdleSeconds = v }, 5);
         Integer(grid, "滚动帧率上限", wallpaper.Fps, 15, 144, (s, v) => s with { Fps = v });
-        Decimal(grid, "渲染像素比（DPR）", wallpaper.RenderScale, .5, 2, .05, (s, v) => s with { RenderScale = v });
+        Decimal(grid, "渲染像素比（DPR）", wallpaper.RenderScale, .5, 2, .05, (s, v) => s with { RenderScale = v },
+            SliderPreview.AfterDrag);
         Boolean(grid, "显示歌词译文", wallpaper.Translation, (s, v) => s with { Translation = v });
         return grid;
     }
@@ -418,7 +472,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
         Integer(grid, "折射强度", wallpaper.RefractionAmount, -80, 20, (s, v) => s with { RefractionAmount = v });
         Boolean(grid, "镜片立体折射", wallpaper.OpticalDepth, (s, v) => s with { OpticalDepth = v },
             "折射方向同时参考轮廓和卡片中心，不影响歌词远近的缩放与淡化。");
-        Integer(grid, "背景模糊", wallpaper.Blur, 0, 36, (s, v) => s with { Blur = v });
+        Integer(grid, "背景模糊", wallpaper.Blur, 0, 36, (s, v) => s with { Blur = v }, preview: SliderPreview.ReducedRate);
         Boolean(grid, "高质量全场模糊", wallpaper.FullSceneBlur, (s, v) => s with { FullSceneBlur = v },
             "使用可分离高斯模糊。普通模糊和高质量模糊都不会影响玻璃外的背景。");
         Boolean(grid, "渐进模糊", wallpaper.ProgressiveBlur, (s, v) => s with { ProgressiveBlur = v },
@@ -601,16 +655,16 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
         Number(grid, label, PlaybackSettingsStore.Read(section, key, fallback), min, max, step, _ => QueueService());
 
     private void Integer(Ui.Grid grid, string label, int initial, int min, int max,
-        Func<WallpaperSettings, int, WallpaperSettings> setter, int step = 1) =>
-        Decimal(grid, label, initial, min, max, step, (s, value) => setter(s, (int)Math.Round(value)));
+        Func<WallpaperSettings, int, WallpaperSettings> setter, int step = 1, SliderPreview preview = SliderPreview.Live) =>
+        Decimal(grid, label, initial, min, max, step, (s, value) => setter(s, (int)Math.Round(value)), preview);
 
     private W.FrameworkElement Decimal(Ui.Grid grid, string label, double initial, double min, double max, double step,
-        Func<WallpaperSettings, double, WallpaperSettings> setter)
+        Func<WallpaperSettings, double, WallpaperSettings> setter, SliderPreview preview = SliderPreview.Live)
     {
-        Number(grid, label, initial, min, max, step, out var field, number =>
+        Number(grid, label, initial, min, max, step, out var field, (slider, number) =>
         {
-            if (number is double value) QueueWallpaper(s => setter(s, value));
-        });
+            if (number is double value) QueueWallpaper(s => setter(s, value), slider.IsDragging ? preview : SliderPreview.Live);
+        }, preview == SliderPreview.Live ? null : FinishWallpaperDrag);
         return field;
     }
 
@@ -673,10 +727,10 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
 
     private Func<double> Number(Ui.Grid grid, string label, double initial, double min, double max, double step,
         Action<double?> changed) =>
-        Number(grid, label, initial, min, max, step, out _, changed);
+        Number(grid, label, initial, min, max, step, out _, (_, number) => changed(number));
 
     private Func<double> Number(Ui.Grid grid, string label, double initial, double min, double max, double step,
-        out W.FrameworkElement field, Action<double?> changed)
+        out W.FrameworkElement field, Action<NativeGlassSlider, double?> changed, Action? dragCompleted = null)
     {
         initial = Math.Clamp(initial, min, max);
         var slider = new NativeGlassSlider { Minimum = min, Maximum = max, Value = initial, TickFrequency = step,
@@ -687,6 +741,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
             TextAlignment = W.TextAlignment.Right };
         W.Automation.AutomationProperties.SetName(slider, label);
         W.Automation.AutomationProperties.SetName(input, label + " 数值");
+        slider.DragCompleted += dragCompleted;
         bool updating = false;
         bool TryRead(out double value) =>
             double.TryParse(input.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) &&
@@ -701,14 +756,14 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
             if (!TryRead(out double value))
             {
                 input.BorderBrush = error;
-                changed(null);
+                changed(slider, null);
                 return;
             }
             input.ClearValue(Ui.TextBox.BorderBrushProperty);
             updating = true;
             slider.Value = value;
             updating = false;
-            changed(value);
+            changed(slider, value);
         };
         input.LostKeyboardFocus += (_, _) =>
         {
@@ -835,11 +890,15 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
             action();
             errorNotice.Visibility = W.Visibility.Collapsed;
         }
-        catch (Exception ex) when (BackgroundRotation.IsImageError(ex) ||
-                                   ex is InvalidOperationException or System.Text.Json.JsonException)
-        {
-            errorNotice.Text = ex is OutOfMemoryException ? "无法读取图片，请选择受支持的图片文件。" : ex.Message;
-            errorNotice.Visibility = W.Visibility.Visible;
-        }
+        catch (Exception ex) when (IsSettingsError(ex)) { ShowError(ex); }
+    }
+
+    private static bool IsSettingsError(Exception ex) =>
+        BackgroundRotation.IsImageError(ex) || ex is InvalidOperationException or System.Text.Json.JsonException;
+
+    private void ShowError(Exception ex)
+    {
+        errorNotice.Text = ex is OutOfMemoryException ? "无法读取图片，请选择受支持的图片文件。" : ex.Message;
+        errorNotice.Visibility = W.Visibility.Visible;
     }
 }
