@@ -40,7 +40,6 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         HorizontalScrollBarVisibility = Ui.ScrollBarVisibility.Disabled,
         PanningMode = Ui.PanningMode.VerticalOnly
     };
-    private readonly Ui.TextBlock title = new();
     private readonly Ui.TextBlock status = new();
     private readonly Ui.TextBlock errorNotice = new() { Visibility = W.Visibility.Collapsed };
     private readonly NativeGlassSwitch testToggle = new() { Content = "测试滚动" };
@@ -193,12 +192,6 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         Ui.DockPanel.SetDock(errorNotice, Ui.Dock.Bottom);
         section.Children.Add(errorNotice);
 
-        title.FontSize = 24;
-        title.Foreground = ink;
-        title.FontWeight = W.FontWeights.SemiBold;
-        title.Margin = new W.Thickness(0, 0, 0, 10);
-        Ui.DockPanel.SetDock(title, Ui.Dock.Top);
-        section.Children.Add(title);
         pageScroll.Content = page;
         section.Children.Add(pageScroll);
         root.Children.Add(section);
@@ -232,7 +225,6 @@ internal sealed class SettingsWindow : Fluent.FluentWindow
         }
         view.Visibility = W.Visibility.Visible;
         visiblePage = view;
-        title.Text = Categories[index].Label;
         errorNotice.Visibility = W.Visibility.Collapsed;
         InvalidateGlass();
     }

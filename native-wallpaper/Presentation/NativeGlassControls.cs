@@ -319,17 +319,17 @@ internal sealed class NativeGlassSelector(bool navigation) : Ui.ListBox, INative
         if (!dragging) gesture.Set(SelectedFraction);
         bool active = gesture.Advance(elapsed);
         float p = gesture.Press;
-        float radius = navigation ? 25 : (float)bounds.Height / 2;
-        float expansion = (navigation ? 8 : 16) * p;
-        float scaleX = 1 + expansion / (float)bounds.Width;
-        float scaleY = navigation ? 1 + expansion / (float)bounds.Height : scaleX;
         var track = bounds;
         track.Inflate(-Inset, -Inset);
         double cellLength = (navigation ? track.Height : track.Width) / Items.Count;
         float opticsScale = Math.Min(1, (float)(navigation ? cellLength + 2 * Inset : bounds.Height) / 64);
-        frame.Shape(frame.Docks, bounds, clip, new(1, 1, 1, .10f), radius,
-            new(24 * opticsScale, -24 * opticsScale, 8 * opticsScale), new(scaleX, scaleY, .32f, 0),
-            new(0, 0, 4, .09f));
+        if (!navigation)
+        {
+            float scale = 1 + 16 * p / (float)bounds.Width;
+            frame.Shape(frame.Docks, bounds, clip, new(1, 1, 1, .10f), (float)bounds.Height / 2,
+                new(24 * opticsScale, -24 * opticsScale, 8 * opticsScale), new(scale, scale, .32f, 0),
+                new(0, 0, 4, .09f));
+        }
         for (int i = 0; i < Items.Count; i++)
         {
             string label = Items[i] is Ui.ListBoxItem item ? item.Content?.ToString() ?? "" : Items[i]?.ToString() ?? "";
