@@ -16,6 +16,7 @@ internal sealed record WallpaperSettings
     public string FontFamily { get; init; } = "Microsoft YaHei UI";
     public int FontScale { get; init; } = 100;
     public int TextColor { get; init; } = unchecked((int)0xFFF0FBFF);
+    public bool AutoInvertText { get; init; }
     public bool AdaptiveContrast { get; init; } = true;
     public int Opacity { get; init; } = 100;
     public int Spacing { get; init; } = 100;
@@ -90,7 +91,7 @@ internal sealed record WallpaperSettings
             new(TintColor, (float)TintAlpha), HueTint, new(SurfaceColor, (float)SurfaceAlpha),
             new(new(ShadowColor, Shadow ? (float)ShadowAlpha : 0), ShadowRadius, ShadowX, ShadowY),
             new(InnerShadow ? (float)InnerShadowAlpha : 0, InnerShadowRadius, InnerShadowX, InnerShadowY)),
-        new(TextColor, (float)FarGlass, DepthEffect, BehindGlass, AdaptiveContrast));
+        new(TextColor, (float)FarGlass, DepthEffect, BehindGlass, AdaptiveContrast, AutoInvertText));
 
     public WallpaperSettings Normalize() => this with
     {

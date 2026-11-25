@@ -24,7 +24,7 @@ internal sealed partial class ColorPickerWindow : Fluent.FluentWindow, INativeGl
     public double SelectedOpacity => OpacitySlider.Value;
 
     public ColorPickerWindow(string title, int argb, double opacity, double minimum, double maximum,
-        bool canEditColor, bool wholePercent)
+        string? colorLockReason, bool wholePercent)
     {
         InitializeComponent();
         SettingsTheme.Apply(this, glassControls: true);
@@ -46,9 +46,10 @@ internal sealed partial class ColorPickerWindow : Fluent.FluentWindow, INativeGl
         HexInput.Text = FormatHex(argb);
         ReadRgb(Rgb(argb));
 
-        if (!canEditColor)
+        if (colorLockReason is not null)
         {
             ColorControls.Visibility = W.Visibility.Collapsed;
+            ColorLockNote.Text = colorLockReason;
             ColorLockNote.Visibility = W.Visibility.Visible;
             HexInput.IsReadOnly = true;
             HexInput.IsTabStop = false;

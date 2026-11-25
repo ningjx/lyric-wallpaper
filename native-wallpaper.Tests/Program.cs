@@ -228,8 +228,8 @@ try
         "turning off lyric depth does not change optical depth");
     var legacyStyle = legacyWallpaper.ToSceneStyle();
     Require(legacyStyle.Glass is { Tone.Dispersion: ChromaticMode.Rgb, ProgressiveBlur: false, HueTint: false } &&
-        !legacyStyle.Glass.Highlight.FollowWallpaper && legacyStyle.Lyrics.AdaptiveContrast,
-        "legacy RGB stays RGB, with manual highlight and adaptive outline defaults");
+        !legacyStyle.Glass.Highlight.FollowWallpaper && legacyStyle.Lyrics is { AutoInvertText: false, AdaptiveContrast: true },
+        "legacy RGB stays RGB, with manual color and adaptive outline defaults");
 
     wallpaper.Save(legacyWallpaper with
     {
@@ -242,6 +242,15 @@ try
         advancedStyle.Lyrics is { AdaptiveContrast: false, BehindGlass: true },
         "advanced glass options persist and spectral dispersion takes precedence over legacy RGB");
     Require(new WallpaperSettings().Dispersion == ChromaticMode.Off, "spectral dispersion remains opt-in");
+
+    const int manualLyricColor = unchecked((int)0xFF428BD6);
+    wallpaper.Save(legacyWallpaper with { AutoInvertText = true, TextColor = manualLyricColor, Opacity = 72 });
+    var automaticLyrics = wallpaper.Load();
+    Require(automaticLyrics.ToSceneStyle().Lyrics is { AutoInvertText: true, TextColor: manualLyricColor, AdaptiveContrast: true } &&
+        automaticLyrics.Opacity == 72, "lyric auto-inversion persists alongside manual color, opacity and adaptive outline");
+    wallpaper.Save(automaticLyrics with { AutoInvertText = false });
+    Require(wallpaper.Load().ToSceneStyle().Lyrics is { AutoInvertText: false, TextColor: manualLyricColor },
+        "turning off lyric auto-inversion restores the saved manual color");
 
     Directory.CreateDirectory(paths.Logs);
     File.WriteAllText(paths.Playback, """{"music":{"enable_netease":false,"enable_apple":false},"extra":{"future":1}}""");
@@ -292,6 +301,36 @@ try
     }
     Require(gapsMatch, "mixed lyrics keep the same glass edge gap with translation and depth toggled");
     Require(focusMatches, "scroll focus stays anchored while the nearest lyric draws last");
+
+    var colorAppearance = new WallpaperSettings { AutoInvertText = true, Vertical = 0, Spacing = 75 };
+    var (beforeRoll, previousCenter) = CollectColorSample(1, moving: false, previous: null);
+    Require(beforeRoll == new TextColorSample(previousCenter) && previousCenter.Ink.X == cards.Max(card => card.Ink.X),
+        "automatic lyric ink samples the centered and largest card");
+    var (whileRolling, incomingCenter) = CollectColorSample(1.8, moving: true, previous: beforeRoll);
+    Require(whileRolling == beforeRoll && whileRolling != new TextColorSample(incomingCenter),
+        "all lyrics keep the settled center sample during a scroll");
+    var (afterRoll, settledCenter) = CollectColorSample(2, moving: false, previous: whileRolling);
+    Require(afterRoll == new TextColorSample(settledCenter) && afterRoll != beforeRoll,
+        "settling samples the incoming center card");
+    var (firstVisible, firstCenter) = CollectColorSample(1.8, moving: true, previous: null);
+    Require(firstVisible == new TextColorSample(firstCenter), "the first visible center card supplies the sample when a scroll is already in progress");
+    Require(LyricLayer.ColorSample(new(mixedLyrics, 1.8, true, 30), automatic: false, firstCenter, beforeRoll) is null,
+        "manual lyric ink clears the shared automatic sample");
+
+    cards.Clear();
+    var clippedCenter = LyricLayer.Collect(new(mixedLyrics, 1, false, 30), colorAppearance with { Vertical = -56 },
+        lyricViewport, lyricText, cards);
+    Require(clippedCenter is { } visibleCenter && visibleCenter.Center.Y == cards.Min(card => card.Center.Y),
+        "a clipped center line falls back to the lyric nearest the center position");
+
+    (TextColorSample? Sample, GlassCard Center) CollectColorSample(double focus, bool moving, TextColorSample? previous)
+    {
+        cards.Clear();
+        var frame = new LyricFrame(mixedLyrics, focus, moving, 30);
+        var center = LyricLayer.Collect(frame, colorAppearance, lyricViewport, lyricText, cards) ??
+            throw new InvalidOperationException("Expected a visible center lyric.");
+        return (LyricLayer.ColorSample(frame, colorAppearance.AutoInvertText, center, previous), center);
+    }
 }
 finally
 {

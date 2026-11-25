@@ -42,6 +42,7 @@ internal static class DesktopScene
         var clock = Stopwatch.StartNew();
         TimeSpan startCpu = default;
         LyricLine[]? lastLines = null;
+        TextColorSample? lyricColorSample = null;
         double measureFrom = -1, nextCheck = 0, nextFrame = 0, lastFocus = double.NaN, lastPresent = -1, lead = 0, clockTick = 0;
         string? capturePath = options.CapturePath;
         (bool HasSong, bool Playing, string Song)? lastStatus = null;
@@ -70,6 +71,7 @@ internal static class DesktopScene
         void SetTestMode(bool enabled)
         {
             if (!wallpaper.SetTesting(enabled, clock.Elapsed.TotalSeconds)) return;
+            lyricColorSample = null;
             dirty = true;
             lastPresent = -1;
             nextFrame = 0;
@@ -82,6 +84,7 @@ internal static class DesktopScene
             double previousScale = wallpaper.Appearance.RenderScale;
             wallpaper.Apply(next, clock.Elapsed.TotalSeconds, scale => renderer?.ChangeRenderScale(scale),
                 image => renderer?.ChangeBackground(image));
+            lyricColorSample = null;
             var currentStyle = wallpaper.Style;
             if (!ReferenceEquals(previousBackground, wallpaper.Background) || previousScale != next.RenderScale ||
                 previousStyle.Background != currentStyle.Background)
@@ -114,6 +117,7 @@ internal static class DesktopScene
 
                 if (wallpaper.Rotate(now, image => renderer?.ChangeBackground(image)))
                 {
+                    lyricColorSample = null;
                     dockPreviews.Invalidate();
                     editorBackdrop = null;
                     dirty = true;
@@ -147,6 +151,7 @@ internal static class DesktopScene
                             var client = window.ClientSize;
                             renderer = new D3D11Renderer(window.Handle, client.Width, client.Height, wallpaper.Background, TextAtlas.Size,
                                 target.Layer.Raised, wallpaper.Appearance.RenderScale);
+                            lyricColorSample = null;
                             text.Attach(renderer);
                             dockPreviews.Invalidate();
                             editorBackdrop = null;
@@ -214,11 +219,13 @@ internal static class DesktopScene
                         text.BeginFrame();
                         lyrics.Clear();
                         cards.Clear();
-                        LyricLayer.Collect(lyric, wallpaper.Appearance, viewport, text, lyrics);
+                        var centerLyric = LyricLayer.Collect(lyric, wallpaper.Appearance, viewport, text, lyrics);
+                        lyricColorSample = LyricLayer.ColorSample(lyric, wallpaper.Appearance.AutoInvertText, centerLyric,
+                            ReferenceEquals(lastLines, lyric.Lines) ? lyricColorSample : null);
                         layouts = WidgetLayer.Collect(content.Visible, viewport, wallpaper.Style.Glass, text,
                             feedbackWidget, feedback.Press, animate, editing, cards);
                         int previousBlurBuilds = renderer.BlurBuilds;
-                        bool presented = renderer.Draw(new SceneFrame(wallpaper.Style, lyrics, cards), capturePath);
+                        bool presented = renderer.Draw(new SceneFrame(wallpaper.Style, lyrics, cards, lyricColorSample), capturePath);
                         report.BlurBuilds += renderer.BlurBuilds - previousBlurBuilds;
                         if (presented)
                         {

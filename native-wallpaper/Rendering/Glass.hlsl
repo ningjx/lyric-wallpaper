@@ -24,9 +24,11 @@ cbuffer Scene : register(b0)
     float4 PreviewWindow;      // scene origin and scene pixels per preview pixel
     float4 LensShape;
     float4 InnerShadow;
-    float4 MaterialOptions;
+    float4 MaterialOptions;     // progressive blur, hue tint, adaptive outline, automatic ink
     float4 WallpaperLightDirection[4];
     float4 WallpaperLightColor[4];
+    float4 ColorSampleCard;     // center XY and half extents of the card used to choose ink
+    float4 ColorSampleText;     // ink size XY and opacity for the reference card
 };
 
 cbuffer BlurKernel : register(b1)
@@ -127,22 +129,6 @@ float4 BlurAxis(Vertex v, bool horizontal) : SV_Target
 
 float4 BlurHorizontal(Vertex v) : SV_Target { return BlurAxis(v, true); }
 float4 BlurVertical(Vertex v) : SV_Target { return BlurAxis(v, false); }
-
-Vertex CardVertex(uint id : SV_VertexID, uint instance : SV_InstanceID)
-{
-    static const float2 corners[6] = {
-        float2(-1, -1), float2(1, -1), float2(-1, 1),
-        float2(-1, 1), float2(1, -1), float2(1, 1)
-    };
-    Vertex v;
-    float2 extra = Shadow.a > 0 ? (ShadowShape.x + abs(ShadowShape.yz)) * View.y / 1080.0 : 0;
-    v.local = corners[id] * (Cards[instance].zw + extra);
-    float2 pixel = Cards[instance].xy + v.local;
-    v.position = float4(pixel / View.xy * float2(2, -2) + float2(-1, 1), 0, 1);
-    v.index = instance;
-    v.ink = Appearance.rgb;
-    return v;
-}
 
 float ShapeDistance(float2 p, float2 halfSize, float radius, bool continuous, out float2 normal)
 {
@@ -351,16 +337,34 @@ float3 GlassSurface(float3 refracted, float strength, float press, float rim)
     return lerp(glass, float3(1, 1, 1), press * (.035 + .075 * rim));
 }
 
-Vertex WidgetVertex(uint id : SV_VertexID, uint instance : SV_InstanceID)
+float CardGlassStrength(float opacity)
 {
-    Vertex v = CardVertex(id, instance);
+    return lerp(1, lerp(Depth.x, 1, opacity), Depth.y) * Appearance.w;
+}
+
+Vertex CardVertex(uint id : SV_VertexID, uint instance : SV_InstanceID)
+{
+    static const float2 corners[6] = {
+        float2(-1, -1), float2(1, -1), float2(-1, 1),
+        float2(-1, 1), float2(1, -1), float2(1, 1)
+    };
+    Vertex v;
+    float4 card = Cards[instance];
+    float scale = View.y / 1080.0;
+    float2 extra = Shadow.a > 0 ? (ShadowShape.x + abs(ShadowShape.yz)) * scale : 0;
+    v.local = corners[id] * (card.zw + extra);
+    float2 pixel = card.xy + v.local;
+    v.position = float4(pixel / View.xy * float2(2, -2) + float2(-1, 1), 0, 1);
+    v.index = instance;
+    v.ink = Appearance.rgb;
+
     [branch] if (MaterialOptions.w > 0)
     {
-        float4 card = Cards[instance];
-        float2 stepPx = Text[instance].xy * (1.0 / 3.0);
-        float scale = View.y / 1080.0;
-        float radius = CardRadius(card.zw, scale);
-        float lensHeight = Optics.x * Appearance.w * scale;
+        float2 stepPx = ColorSampleText.xy * (1.0 / 3.0);
+        float radius = CardRadius(ColorSampleCard.zw, scale);
+        float strength = CardGlassStrength(ColorSampleText.z);
+        float lensHeight = Optics.x * strength * scale;
+        float press = saturate(Depth.w);
         float luminance = 0;
         [loop] for (int row = -1; row <= 1; row++)
         {
@@ -368,13 +372,12 @@ Vertex WidgetVertex(uint id : SV_VertexID, uint instance : SV_InstanceID)
             {
                 float2 local = float2(column, row) * stepPx;
                 float2 normal;
-                float distance = ShapeDistance(local, card.zw, radius, LensShape.y > 0, normal);
+                float distance = ShapeDistance(local, ColorSampleCard.zw, radius, LensShape.y > 0, normal);
                 float rim = lensHeight > 0 ? saturate(1 + distance / max(lensHeight, 1e-5)) : 0;
-                float press = saturate(Depth.w);
-                float2 shift = LensOffset(local, normal, rim, Optics.y * (1 + .25 * press) * Appearance.w * scale) * LensBend(rim);
-                float blurWeight = GlassBlurWeight(distance, lensHeight, card.w, scale);
-                float3 backdrop = SampleGlassBackground(card.xy + local + shift, Optics.z * scale, blurWeight);
-                luminance += RelativeLuminance(GlassSurface(backdrop, Appearance.w, press, rim));
+                float2 shift = LensOffset(local, normal, rim, Optics.y * (1 + .25 * press) * strength * scale) * LensBend(rim);
+                float blurWeight = GlassBlurWeight(distance, lensHeight, ColorSampleCard.w, scale);
+                float3 backdrop = SampleGlassBackground(ColorSampleCard.xy + local + shift, Optics.z * scale, blurWeight);
+                luminance += RelativeLuminance(GlassSurface(backdrop, strength, press, rim));
             }
         }
         v.ink = 1 - step(.179, luminance / 9.0);
@@ -385,7 +388,7 @@ Vertex WidgetVertex(uint id : SV_VertexID, uint instance : SV_InstanceID)
 float4 GlassPixel(Vertex v, bool overlay)
 {
     float4 text = Text[v.index];
-    float strength = lerp(1, lerp(Depth.x, 1, text.z), Depth.y) * Appearance.w;
+    float strength = CardGlassStrength(text.z);
     float2 halfSize = Cards[v.index].zw;
     float scale = View.y / 1080.0;
     // The rounded corner must stay outside the rectangle occupied by the glyphs.

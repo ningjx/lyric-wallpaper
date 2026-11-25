@@ -24,6 +24,11 @@ internal readonly record struct SceneViewport(int Width, int Height, Rectangle O
 internal readonly record struct GlassCard(Vector2 Center, Vector2 Half, Vector2 Ink, Vector4 Uv, int Color,
     float Opacity, float Padding, float Press = 0, bool AutoInvertText = false);
 
+internal readonly record struct TextColorSample(Vector2 Center, Vector2 Half, Vector2 Ink, float Opacity)
+{
+    public TextColorSample(GlassCard card) : this(card.Center, card.Half, card.Ink, card.Opacity) { }
+}
+
 internal readonly record struct WidgetPreviewFrame(string Type, int Width, int Height, byte[] Pixels);
 
 internal sealed record WidgetEditorBackdrop(int Width, int Height, byte[] Pixels);

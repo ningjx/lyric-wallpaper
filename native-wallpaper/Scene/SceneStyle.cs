@@ -16,8 +16,10 @@ internal readonly record struct GlassMaterial(float Strength, int RefractionHeig
     bool FullSceneBlur, bool ProgressiveBlur, bool OpticalDepth, bool ContinuousCorners, GlassTone Tone, GlassHighlight Highlight,
     MaterialColor Tint, bool HueTint, MaterialColor Surface, GlassShadow Shadow, GlassInnerShadow InnerShadow);
 
-internal readonly record struct LyricGlassStyle(int TextColor, float FarGlass, bool Depth, bool BehindGlass, bool AdaptiveContrast);
+internal readonly record struct LyricGlassStyle(int TextColor, float FarGlass, bool Depth, bool BehindGlass,
+    bool AdaptiveContrast, bool AutoInvertText);
 
 internal readonly record struct SceneStyle(BackgroundView Background, GlassMaterial Glass, LyricGlassStyle Lyrics);
 
-internal readonly record struct SceneFrame(SceneStyle Style, IReadOnlyList<GlassCard> Lyrics, IReadOnlyList<GlassCard> Widgets);
+internal readonly record struct SceneFrame(SceneStyle Style, IReadOnlyList<GlassCard> Lyrics, IReadOnlyList<GlassCard> Widgets,
+    TextColorSample? LyricColorSample = null);

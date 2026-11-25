@@ -72,13 +72,22 @@ internal static class LyricLayer
         return new(TestLines, active - 1 + Step(since) / Step(duration), true, elapsed + TestInterval - since);
     }
 
-    public static void Collect(LyricFrame frame, WallpaperSettings settings, SceneViewport viewport, ISceneText text, List<GlassCard> cards)
+    public static TextColorSample? ColorSample(LyricFrame frame, bool automatic, GlassCard? center,
+        TextColorSample? previous)
+    {
+        if (!automatic || center is not { } card) return null;
+        // Keep the settled center sample while the next line scrolls in.
+        return frame.Moving && previous is { } sample ? sample : new TextColorSample(card);
+    }
+
+    public static GlassCard? Collect(LyricFrame frame, WallpaperSettings settings, SceneViewport viewport, ISceneText text,
+        List<GlassCard> cards)
     {
         int width = viewport.Width, height = viewport.Height;
         double focus = frame.Focus;
         int first = Math.Max(0, (int)Math.Ceiling(focus - settings.RenderDistance));
         int end = Math.Min(frame.Lines.Length, (int)Math.Floor(focus + settings.RenderDistance) + 1);
-        if (end <= first) return;
+        if (end <= first) return null;
 
         float gap = EdgeGap(height, settings);
         float padding = Padding(height, settings);
@@ -115,7 +124,18 @@ internal static class LyricLayer
             lowerEdge = nextTop + 2 * card.Half.Y;
         }
         // Draw the closest line last, above any surrounding shadows.
-        if (foreground is { } closest) cards.Add(closest);
+        if (foreground is { } closest)
+        {
+            cards.Add(closest);
+            return closest;
+        }
+        // The center can be clipped when the layout is shifted toward the edge of the screen.
+        for (int i = firstCard; i < cards.Count; i++)
+        {
+            if (foreground is not { } nearest || MathF.Abs(cards[i].Center.Y - originY) < MathF.Abs(nearest.Center.Y - originY))
+                foreground = cards[i];
+        }
+        return foreground;
 
         GlassCard Measure(int index)
         {

@@ -25,7 +25,7 @@ internal sealed unsafe partial class D3D11Renderer : IDisposable
     private static readonly Guid DxgiFactory2Id = new("50c83a1c-e072-4c48-87b0-3630fa36a6d0");
     private nint device, context, chain, target, constants, blurConstants, sampler, background, lyrics, atlasTexture;
     private nint backgroundVs, backgroundPs, cardVs, cardPs, blurDownsamplePs, blurHorizontalPs, blurVerticalPs;
-    private nint widgetVs, widgetPs, widgetBlend;
+    private nint widgetPs, widgetBlend;
     private nint previewBackgroundPs, previewWidgetPs, editorBackdropPs, previewTexture, previewTarget, previewStaging;
     private (nint Target, nint Input) blurHorizontal, blurResult;
     private (Size Size, bool Mipmapped) blurSurface;
@@ -37,7 +37,8 @@ internal sealed unsafe partial class D3D11Renderer : IDisposable
     private (BackgroundView View, int Width, int Height)? lightKey;
     private WallpaperLight[] wallpaperLights = [];
     private const int WallpaperLightsOffset = 65;
-    public const int SceneVectors = WallpaperLightsOffset + WallpaperLightMap.MaxSources * 2;
+    private const int ColorSampleOffset = WallpaperLightsOffset + WallpaperLightMap.MaxSources * 2;
+    public const int SceneVectors = ColorSampleOffset + 2;
     public int OutputWidth { get; }
     public int OutputHeight { get; }
     public int Width { get; private set; }
@@ -85,7 +86,6 @@ internal sealed unsafe partial class D3D11Renderer : IDisposable
             backgroundPs = CreateShader(source, "BackgroundPixel", "ps_5_0", Device.CreatePixelShader);
             cardVs = CreateShader(source, "CardVertex", "vs_5_0", Device.CreateVertexShader);
             cardPs = CreateShader(source, "CardPixel", "ps_5_0", Device.CreatePixelShader);
-            widgetVs = CreateShader(source, "WidgetVertex", "vs_5_0", Device.CreateVertexShader);
             widgetPs = CreateShader(source, "WidgetPixel", "ps_5_0", Device.CreatePixelShader);
             blurDownsamplePs = CreateShader(source, "BlurDownsample", "ps_5_0", Device.CreatePixelShader);
             blurHorizontalPs = CreateShader(source, "BlurHorizontal", "ps_5_0", Device.CreatePixelShader);
@@ -203,14 +203,15 @@ internal sealed unsafe partial class D3D11Renderer : IDisposable
     public bool Draw(SceneFrame frame, string? capturePath)
     {
         Span<Vector4> scene = stackalloc Vector4[SceneVectors];
-        bool sampleBlur = PrepareScene(scene, frame.Style, frame.Lyrics, frame.Widgets.Count > 0);
+        bool sampleBlur = PrepareScene(scene, frame.Style, frame.Lyrics, frame.Widgets.Count > 0, frame.LyricColorSample);
 
         // Flip-model Present unbinds the back buffer, so bind it again each frame.
         SetTarget(target);
         SetViewport(Width, Height);
         if (sampleBlur) SetBlurInput(blurResult.Input);
         DrawBackground(backgroundPs);
-        if (frame.Lyrics.Count != 0) DrawCards(cardVs, cardPs, (uint)frame.Lyrics.Count);
+        if (frame.Lyrics.Count != 0)
+            DrawCards(cardPs, (uint)frame.Lyrics.Count, sampleBlur && frame.Style.Lyrics.AutoInvertText);
         if (frame.Widgets.Count > 0)
         {
             var lights = FindWallpaperLights(scene, frame.Style);
@@ -274,7 +275,8 @@ internal sealed unsafe partial class D3D11Renderer : IDisposable
         scene[34] = new(view.Zoom / 100f, view.X / 100f, view.Y / 100f, view.Layout == BackgroundLayout.Tile ? 1 : 0);
     }
 
-    private bool PrepareScene(Span<Vector4> scene, SceneStyle style, IReadOnlyList<GlassCard> lyricsCards, bool hasWidgets)
+    private bool PrepareScene(Span<Vector4> scene, SceneStyle style, IReadOnlyList<GlassCard> lyricsCards, bool hasWidgets,
+        TextColorSample? lyricColorSample = null)
     {
         var view = style.Background;
         var material = style.Glass;
@@ -292,9 +294,12 @@ internal sealed unsafe partial class D3D11Renderer : IDisposable
         scene[43] = new(lyricsStyle.FarGlass, lyricsStyle.Depth ? 1 : 0, lyricsCards.Count == 0 ? 0 : lyricsCards[0].Padding, 0);
         scene[62] = new(material.OpticalDepth ? 1 : 0, material.ContinuousCorners ? 1 : 0, 0, 0);
         scene[63] = new(material.InnerShadow.Alpha, material.InnerShadow.Radius, material.InnerShadow.X, material.InnerShadow.Y);
-        scene[64] = new(material.ProgressiveBlur ? 1 : 0, material.HueTint ? 1 : 0, lyricsStyle.AdaptiveContrast ? 1 : 0, 0);
-        scene[WallpaperLightsOffset..].Clear();
+        scene[64] = new(material.ProgressiveBlur ? 1 : 0, material.HueTint ? 1 : 0,
+            lyricsStyle.AdaptiveContrast ? 1 : 0, lyricsStyle.AutoInvertText ? 1 : 0);
+        scene[WallpaperLightsOffset..ColorSampleOffset].Clear();
         for (int i = 0; i < lyricsCards.Count; i++) PackCard(scene, i, lyricsCards[i]);
+        if (lyricsStyle.AutoInvertText && lyricsCards.Count != 0)
+            PackColorSample(scene, lyricColorSample ?? new TextColorSample(lyricsCards[^1]));
         bool blurEnabled = material.Blur > 0 && material.Strength > 0 && (!lyricsStyle.BehindGlass || material.ProgressiveBlur);
         bool sampleBlur = blurEnabled && (lyricsCards.Count != 0 || hasWidgets);
         float blurRadius = material.Blur * Height / 1080f;
@@ -356,6 +361,7 @@ internal sealed unsafe partial class D3D11Renderer : IDisposable
         scene[33] = PackColor(card.Color, strength);
         scene[43] = new(1, 0, card.Padding, card.Press);
         scene[64].W = card.AutoInvertText ? 1 : 0;
+        if (card.AutoInvertText) PackColorSample(scene, new TextColorSample(card));
         if (!lights.IsEmpty)
         {
             for (int index = 0; index < lights.Length; index++)
@@ -368,9 +374,7 @@ internal sealed unsafe partial class D3D11Renderer : IDisposable
             scene[38].W = 3;
         }
         WriteConstants(scene);
-        if (card.AutoInvertText && scene[44].W > 0) SetWidgetBlurInput(blurResult.Input);
-        DrawCards(widgetVs, pixelShader, 1);
-        if (card.AutoInvertText && scene[44].W > 0) SetWidgetBlurInput(0);
+        DrawCards(pixelShader, 1, card.AutoInvertText && scene[44].W > 0);
     }
 
     private void EnsurePreviewResources()
@@ -436,6 +440,12 @@ internal sealed unsafe partial class D3D11Renderer : IDisposable
         constants[45 + index] = card.Uv;
     }
 
+    private static void PackColorSample(Span<Vector4> constants, TextColorSample sample)
+    {
+        constants[ColorSampleOffset] = new(sample.Center.X, sample.Center.Y, sample.Half.X, sample.Half.Y);
+        constants[ColorSampleOffset + 1] = new(sample.Ink, sample.Opacity, 0);
+    }
+
     private static Vector4 PackColor(MaterialColor value) => PackColor(value.Argb, value.Alpha);
 
     private static Vector4 PackColor(int argb, float alpha)
@@ -453,11 +463,13 @@ internal sealed unsafe partial class D3D11Renderer : IDisposable
                 (context, buffer, 0, 0, data, 0, 0);
     }
 
-    private void DrawCards(nint vertexShader, nint pixelShader, uint count)
+    private void DrawCards(nint pixelShader, uint count, bool vertexBlur)
     {
-        SetShaders(vertexShader, pixelShader);
+        if (vertexBlur) SetVertexBlurInput(blurResult.Input);
+        SetShaders(cardVs, pixelShader);
         ((delegate* unmanaged[Stdcall]<nint, uint, uint, uint, uint, void>)Slot(context, (int)Context.DrawInstanced))
             (context, 6, count, 0, 0);
+        if (vertexBlur) SetVertexBlurInput(0);
     }
 
     private void SetBlend(nint state) =>
@@ -633,7 +645,7 @@ internal sealed unsafe partial class D3D11Renderer : IDisposable
         ((delegate* unmanaged[Stdcall]<nint, uint, uint, nint*, void>)Slot(context, (int)Context.PSSetShaderResources))
             (context, 2, 1, &input);
 
-    private void SetWidgetBlurInput(nint input) =>
+    private void SetVertexBlurInput(nint input) =>
         BindResources(Context.VSSetShaderResources, 1, &input, startSlot: 2);
 
     private void BindScene()
@@ -745,10 +757,10 @@ internal sealed unsafe partial class D3D11Renderer : IDisposable
         ReleasePreviewResources();
         ReleaseBlur();
         foreach (nint resource in new[] { context, target, constants, blurConstants, sampler, lyrics, atlasTexture, background,
-            cardPs, cardVs, backgroundPs, backgroundVs, blurDownsamplePs, blurHorizontalPs, blurVerticalPs, widgetVs, widgetPs, widgetBlend, chain, device })
+            cardPs, cardVs, backgroundPs, backgroundVs, blurDownsamplePs, blurHorizontalPs, blurVerticalPs, widgetPs, widgetBlend, chain, device })
             if (resource != 0) Marshal.Release(resource);
         context = target = constants = blurConstants = sampler = lyrics = atlasTexture = background = cardPs = cardVs =
-            backgroundPs = backgroundVs = blurDownsamplePs = blurHorizontalPs = blurVerticalPs = widgetVs = widgetPs = widgetBlend = chain = device = 0;
+            backgroundPs = backgroundVs = blurDownsamplePs = blurHorizontalPs = blurVerticalPs = widgetPs = widgetBlend = chain = device = 0;
     }
 
     private static nint Slot(nint instance, int slot) => (*(nint**)instance)[slot];

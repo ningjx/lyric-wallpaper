@@ -86,7 +86,7 @@
                         Background="{StaticResource HueGradient}" Minimum="0" Maximum="360"
                         SmallChange="1" LargeChange="15" AutomationProperties.Name="色相" />
             </StackPanel>
-            <TextBlock x:Name="ColorLockNote" Text="控件高光颜色跟随壁纸" Visibility="Collapsed"
+            <TextBlock x:Name="ColorLockNote" Visibility="Collapsed"
                        Margin="0,2,0,10" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             <DockPanel Margin="0,0,0,2">
                 <fluent:TextBox x:Name="OpacityInput" DockPanel.Dock="Right" Width="72" Height="28"

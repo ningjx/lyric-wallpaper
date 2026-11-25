@@ -426,11 +426,14 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
             SetPath(font, family, "");
             QueueWallpaper(s => s with { FontFamily = family });
         })));
+        var autoInvert = Boolean(grid, "文字自动反色", wallpaper.AutoInvertText, (s, v) => s with { AutoInvertText = v },
+            "按中间歌词的背景为整屏歌词选色，亮处用黑字，暗处用白字。滚动停稳后更新。");
         ColorField(grid, "文字颜色", wallpaper.TextColor, wallpaper.Opacity / 100d,
             (s, color, opacity) => s with { TextColor = color, Opacity = (int)Math.Round(opacity * 100) },
-            minimum: .2, wholePercent: true);
+            minimum: .2, wholePercent: true,
+            colorLockReason: () => autoInvert.IsChecked == true ? "文字颜色随背景明暗自动切换" : null);
         Boolean(grid, "自适应文字对比度", wallpaper.AdaptiveContrast, (s, v) => s with { AdaptiveContrast = v },
-            "背景与文字过于接近时，自动加浅色或深色细描边，保留所选文字颜色。");
+            "背景与文字过于接近时，自动加浅色或深色细描边。");
         Integer(grid, "字号（%）", wallpaper.FontScale, 50, 160, (s, v) => s with { FontScale = v });
         Integer(grid, "行距（%）", wallpaper.Spacing, 35, 175, (s, v) => s with { Spacing = v });
         Integer(grid, "背板内边距", wallpaper.Padding, 0, 160, (s, v) => s with { Padding = v });
@@ -507,7 +510,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
             wallpaper.HighlightMode, (s, v) => s with { HighlightMode = v });
         ColorField(grid, "高光颜色", wallpaper.HighlightColor, wallpaper.HighlightAlpha,
             (s, color, opacity) => s with { HighlightColor = color, HighlightAlpha = opacity },
-            canEditColor: () => followWallpaper.IsChecked != true);
+            colorLockReason: () => followWallpaper.IsChecked == true ? "控件高光颜色跟随壁纸" : null);
         var highlightAngle = Decimal(grid, "高光角度", wallpaper.HighlightAngle, -3.14, 3.14, .01, (s, v) => s with { HighlightAngle = v });
         void UpdateManualHighlight()
         {
@@ -696,7 +699,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
 
     private void ColorField(Ui.Grid grid, string label, int color, double opacity,
         Func<WallpaperSettings, int, double, WallpaperSettings> setter, double minimum = 0, double maximum = 1,
-        bool wholePercent = false, Func<bool>? canEditColor = null)
+        bool wholePercent = false, Func<string?>? colorLockReason = null)
     {
         var pickColor = Button();
         pickColor.HorizontalAlignment = W.HorizontalAlignment.Left;
@@ -712,7 +715,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
         Refresh();
         pickColor.Click += (_, _) => TryAction(() =>
         {
-            var picker = new ColorPickerWindow(label, color, opacity, minimum, maximum, canEditColor?.Invoke() ?? true, wholePercent)
+            var picker = new ColorPickerWindow(label, color, opacity, minimum, maximum, colorLockReason?.Invoke(), wholePercent)
             {
                 Owner = this
             };
