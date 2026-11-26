@@ -1,0 +1,62 @@
+<UserControl x:Class="LyricWallpaper.Presentation.PlaybackStatusCard" x:ClassModifier="internal"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             AutomationProperties.Name="播放状态" Focusable="False"
+             Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+    <UserControl.Resources>
+        <Style x:Key="Caption" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            <Setter Property="Opacity" Value="0.76" />
+        </Style>
+    </UserControl.Resources>
+    <StackPanel Margin="13,12">
+        <DockPanel>
+            <Ellipse x:Name="StatusDot" DockPanel.Dock="Left" Width="6" Height="6"
+                     Margin="0,0,6,0" VerticalAlignment="Center" />
+            <TextBlock x:Name="PlayState" DockPanel.Dock="Right" Style="{StaticResource Caption}" />
+            <TextBlock x:Name="Player" TextTrimming="CharacterEllipsis">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock" BasedOn="{StaticResource Caption}">
+                        <Setter Property="FontWeight" Value="SemiBold" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Visibility, ElementName=PlaybackDetails}" Value="Collapsed">
+                                <Setter Property="FontSize" Value="13" />
+                                <Setter Property="FontWeight" Value="Normal" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </DockPanel>
+        <StackPanel x:Name="PlaybackDetails" Visibility="Collapsed">
+            <TextBlock x:Name="Song" Margin="0,7,0,0" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+            <TextBlock x:Name="Detail" Margin="0,1,0,0" Style="{StaticResource Caption}" TextTrimming="CharacterEllipsis" />
+            <ProgressBar x:Name="Progress" Height="3" Margin="0,9,0,0" Maximum="1"
+                         Foreground="#007AFF" Background="#33778291" AutomationProperties.Name="播放进度">
+                <ProgressBar.Template>
+                    <ControlTemplate TargetType="ProgressBar">
+                        <Grid x:Name="PART_Track">
+                            <Border Background="{TemplateBinding Background}" CornerRadius="1.5" />
+                            <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="1.5"
+                                    Background="{TemplateBinding Foreground}" />
+                        </Grid>
+                    </ControlTemplate>
+                </ProgressBar.Template>
+            </ProgressBar>
+            <DockPanel Margin="0,3,0,0" TextBlock.FontSize="11" Typography.NumeralAlignment="Tabular"
+                       TextBlock.Foreground="{DynamicResource TextFillColorPrimaryBrush}" Opacity="0.76">
+                <TextBlock x:Name="TotalTime" DockPanel.Dock="Right" />
+                <TextBlock x:Name="ElapsedTime" />
+            </DockPanel>
+            <Border Margin="0,7,0,0" Padding="0,6,0,0" BorderThickness="0,1,0,0"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock FontFamily="Segoe Fluent Icons" FontSize="12" Text="&#xE8D6;" Margin="0,0,5,0"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Opacity="0.76" VerticalAlignment="Center" />
+                    <TextBlock x:Name="LyricState" Style="{StaticResource Caption}" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </StackPanel>
+</UserControl>

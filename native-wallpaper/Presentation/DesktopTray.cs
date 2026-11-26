@@ -150,13 +150,13 @@ internal sealed class DesktopTray : IDisposable
         if (exiting) return;
         if (settings is null || settings.IsClosed)
         {
-            settings = new SettingsWindow(wallpaperStore, playbackStore, currentWallpaper(), applyWallpaper, worker.Restart, ChangeTestMode, ChangeStartup);
+            settings = new SettingsWindow(wallpaperStore, playbackStore, currentWallpaper(), applyWallpaper,
+                () => worker.Latest, worker.Restart, ChangeTestMode, ChangeStartup);
             System.Windows.Forms.Integration.ElementHost.EnableModelessKeyboardInterop(settings);
         }
         settings.ShowPage(service);
         RefreshStartup();
         settings.SetTestMode(testEnabled());
-        settings.SetStatus(status.Text);
         if (!settings.IsVisible) settings.Show();
         if (settings.WindowState == System.Windows.WindowState.Minimized)
             settings.WindowState = System.Windows.WindowState.Normal;
@@ -185,7 +185,6 @@ internal sealed class DesktopTray : IDisposable
         if (status.Text == description) return;
         status.Text = description;
         statusItem.ToolTip = description;
-        if (settings is { IsClosed: false }) settings.SetStatus(description);
     }
 
     private void ChangeTestMode(bool enabled)

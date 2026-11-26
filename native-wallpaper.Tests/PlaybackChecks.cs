@@ -27,10 +27,11 @@ internal static class PlaybackChecks
         var netease = new PlayerSnapshot("NetEase", "Artist", null, 25, true);
         var apple = new PlayerSnapshot("Apple", "Artist", 240, 15, true);
         arbiter.Update("netease", netease, 1);
-        require(arbiter.Pick(1) == netease, "NetEase can play with an unknown total duration");
+        require(arbiter.Pick(1)?.Snapshot == netease, "NetEase can play with an unknown total duration");
         arbiter.Update("applemusic", apple, 2);
         arbiter.Update("netease", netease with { Duration = 180, Position = 26 }, 3);
-        require(arbiter.Pick(3) == apple, "learning the duration leaves player arbitration stable");
+        require(arbiter.Pick(3) is { Source: "applemusic", Snapshot: var picked } && picked == apple,
+            "learning the duration leaves player arbitration stable");
 
         var folder = Directory.CreateTempSubdirectory("LyricWallpaper.Playback.Tests.");
         try
@@ -38,6 +39,7 @@ internal static class PlaybackChecks
             await CheckEarlyLyricsAsync(Path.Combine(folder.FullName, "early"), require);
             await CheckOnlinePreviewAsync(Path.Combine(folder.FullName, "online"), require);
             await CheckRetryAsync(Path.Combine(folder.FullName, "retry"), require);
+            await CheckUnavailableAsync(Path.Combine(folder.FullName, "unavailable"), require);
             await CheckSwitchAsync(Path.Combine(folder.FullName, "switch"), require);
         }
         finally { folder.Delete(recursive: true); }
@@ -116,6 +118,7 @@ internal static class PlaybackChecks
         var options = Options(directory, ["netease"]);
         int searches = 0;
         var heard = new TaskCompletionSource<PlaybackSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var changes = new ConcurrentQueue<PlaybackSnapshot>();
         using var stop = new CancellationTokenSource();
         using var http = new LyricHttp(options.Netease, stop.Token, new TestResponses((request, _) =>
         {
@@ -131,6 +134,7 @@ internal static class PlaybackChecks
         }));
         var session = new PlaybackSession(options, new(options, http, _ => { }), snapshot =>
         {
+            changes.Enqueue(snapshot);
             if (snapshot.Track.Lyrics.Length > 0) heard.TrySetResult(snapshot);
         }, _ => { }, stop.Token);
         var run = session.RunAsync(Path.Combine(directory, "config.json"));
@@ -140,6 +144,46 @@ internal static class PlaybackChecks
             var snapshot = await heard.Task.WaitAsync(TestTimeout);
             require(snapshot is { Track.Song: title, Track.Lyrics: "[00:01.00]recovered" } && searches == 2,
                 "lyrics recover after a miss while the same song stays selected");
+            var songChanges = changes.Where(item => item.HasSong).ToArray();
+            require(songChanges.Select(item => item.Lyrics).SequenceEqual([LyricActivity.Searching, LyricActivity.WaitingToRetry,
+                LyricActivity.Searching, LyricActivity.Downloading, LyricActivity.Ready]) &&
+                songChanges.All(item => item.ReceivedAt == snapshot.ReceivedAt && item.Duration is null),
+                "lyric search, retry and download update the card without restarting the playback clock");
+            session.Update("netease", new(title, artist, 180, 9, true));
+            require(changes.Last() is { Source: "netease", Duration: 180 } latest && latest.ReceivedAt == snapshot.ReceivedAt,
+                "learning the total duration updates progress even at the same position");
+            session.Update("applemusic", new(title, artist, 180, 9, false));
+            session.Update("netease", null);
+            require(changes.Last() is { Source: "applemusic", Playing: false, CurrentPosition: 9, Lyrics: LyricActivity.Ready },
+                "a paused player taking over the same song keeps its lyrics and exact elapsed time");
+            session.Update("applemusic", null);
+            require(changes.Last() is { HasSong: false, Duration: null, Lyrics: LyricActivity.Idle, Track.Song: "" },
+                "losing the player clears the card's song, time and lyrics");
+        }
+        finally
+        {
+            await stop.CancelAsync();
+            await run.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+    }
+
+    private static async Task CheckUnavailableAsync(string directory, Action<bool, string> require)
+    {
+        var options = Options(directory, ["local-file"]);
+        using var stop = new CancellationTokenSource();
+        using var http = new LyricHttp(options.Netease, stop.Token);
+        var finished = new TaskCompletionSource<PlaybackSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var session = new PlaybackSession(options, new(options, http, _ => { }), snapshot =>
+        {
+            if (snapshot.Lyrics == LyricActivity.Unavailable) finished.TrySetResult(snapshot);
+        }, _ => { }, stop.Token);
+        var run = session.RunAsync(Path.Combine(directory, "config.json"));
+        try
+        {
+            session.Update("applemusic", new("Missing lyrics", "", 120, 3, false));
+            var final = await finished.Task.WaitAsync(TestTimeout);
+            require(final is { Track.Song: "Missing lyrics", Playing: false, Duration: 120, CurrentPosition: 3 },
+                "exhausting lyric retries publishes the result while playback stays paused");
         }
         finally
         {

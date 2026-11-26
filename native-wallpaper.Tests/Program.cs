@@ -258,7 +258,7 @@ try
     playbackSettings.Edit(settings => PlaybackSettingsStore.Section(settings, "music")["apple_poll_interval"] = .3);
     Require(playbackSettings.Load()["extra"]?["future"]?.GetValue<int>() == 1, "playback settings retain unknown fields");
     using var playback = new LyricsService(paths.Playback, paths.Logs);
-    Require(SpinWait.SpinUntil(() => playback.Latest is { HasSong: false }, TimeSpan.FromSeconds(3)),
+    Require(SpinWait.SpinUntil(() => playback.Latest is { HasSong: false, DetectionEnabled: false }, TimeSpan.FromSeconds(3)),
         "in-process playback service publishes initial state");
     var firstSnapshot = playback.Latest;
     playback.Restart();
@@ -268,7 +268,7 @@ try
 
     var timeline = new LyricTimeline();
     var track = new PlaybackTrack("测试", "歌手", "[00:01]第一句\n[00:04]第二句", "[00:01]译文");
-    timeline.Update(new(true, false, 1, track, Stopwatch.GetTimestamp()), 0);
+    timeline.Update(new("netease", false, 1, 60, track, Stopwatch.GetTimestamp(), LyricActivity.Ready, true), 0);
     var frame = timeline.At(0, .1, new WallpaperSettings());
     Require(!frame.Idle && frame.Lines.Any(line => line.Translation == "译文") &&
         timeline.At(31, .1, new WallpaperSettings()).Idle, "lyrics timeline keeps translation and idle transitions");

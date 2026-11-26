@@ -18,6 +18,55 @@ internal static class GlassInput
     public static W.Rect Centered(double x, double y, double w, double h) => new(x - w / 2, y - h / 2, w, h);
 }
 
+internal sealed class NativeGlassScrollTrack : Primitives.Track, INativeGlassControl
+{
+    private GlassSpring hover = new(0), press = new(0);
+    private bool mouseOver;
+
+    public NativeGlassScrollTrack() => IsMouseCaptureWithinChanged += (_, _) => GlassInput.Invalidate(this);
+
+    protected override void OnMouseEnter(Input.MouseEventArgs e)
+    {
+        base.OnMouseEnter(e);
+        mouseOver = e.StylusDevice is null;
+        GlassInput.Invalidate(this);
+    }
+
+    protected override void OnMouseLeave(Input.MouseEventArgs e)
+    {
+        base.OnMouseLeave(e);
+        mouseOver = false;
+        GlassInput.Invalidate(this);
+    }
+
+    public bool Compose(GlassFrame frame, W.Rect bounds, W.Rect clip, double elapsed)
+    {
+        if (Thumb is not { IsVisible: true, ActualHeight: > 0 } thumb) return false;
+        bool active = hover.Step(mouseOver || thumb.IsDragging ? 1 : 0, elapsed, 1000, 1);
+        active |= press.Step(thumb.IsDragging ? 1 : 0, elapsed, 1000, 1);
+        float over = (float)hover.Position, held = (float)press.Position;
+        double center = bounds.Left + bounds.Width / 2;
+        // Keep the native thumb's travel and 16-DIP hit area independent of the optical width.
+        double top = bounds.Top + thumb.TranslatePoint(new W.Point(), this).Y;
+        double width = 4 + 2 * over + 2 * held;
+        var handle = new W.Rect(center - width / 2, top, width, thumb.ActualHeight);
+        double railWidth = 2 + 6 * over + 2 * held;
+        var rail = new W.Rect(center - railWidth / 2, bounds.Top, railWidth, bounds.Height);
+        if (W.SystemParameters.HighContrast)
+        {
+            var ink = W.SystemColors.WindowTextColor;
+            frame.Shape(frame.Paint, handle, clip, new(ink.R / 255f, ink.G / 255f, ink.B / 255f, 1), (float)width / 2);
+            return active;
+        }
+        frame.Shape(frame.Surfaces, rail, clip, new(.26f, .33f, .40f, .09f + .07f * over), (float)railWidth / 2,
+            style: new(1, 1, .32f * over, 0));
+        var tint = Vector4.Lerp(new(.18f, .25f, .32f, .54f), new(.06f, .36f, .66f, .56f), held);
+        frame.Shape(frame.Lenses, handle, clip, tint, (float)width / 2, new(2 + over, -3 - 3 * held, 1),
+            new(1, 1, .32f + .40f * over + .16f * held, 0));
+        return active;
+    }
+}
+
 internal sealed class NativeGlassButton : Fluent.Button, INativeGlassControl
 {
     private static readonly Vector4 AccentSurface = new(0, 94 / 255f, 184 / 255f, 1);

@@ -2,6 +2,90 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:local="clr-namespace:LyricWallpaper.Presentation">
     <!-- These templates provide layout, hit targets, and keyboard focus. The visible glass is drawn by D3D11. -->
+    <!-- WPF's focus adorner follows keyboard navigation independently of the selected glass lens. -->
+    <Style x:Key="DefaultControlFocusVisualStyle" TargetType="Control">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Control">
+                    <Border Width="18" Height="4" Margin="0,0,0,2" CornerRadius="2"
+                            HorizontalAlignment="Center" VerticalAlignment="Bottom" IsHitTestVisible="False"
+                            Background="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"
+                            BorderBrush="#C0FFFFFF" BorderThickness="1" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="{x:Static SystemParameters.FocusVisualStyleKey}" TargetType="Control"
+           BasedOn="{StaticResource DefaultControlFocusVisualStyle}" />
+
+    <Style x:Key="ScrollPageButton" TargetType="RepeatButton">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RepeatButton">
+                    <Border Background="Transparent" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <ControlTemplate x:Key="GlassScrollBar" TargetType="ScrollBar">
+        <Border Background="Transparent" Padding="0,2">
+            <local:NativeGlassScrollTrack x:Name="PART_Track" IsDirectionReversed="True" Orientation="Vertical">
+                <Track.DecreaseRepeatButton>
+                    <RepeatButton Style="{StaticResource ScrollPageButton}" Command="{x:Static ScrollBar.PageUpCommand}"
+                                  CommandTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}" />
+                </Track.DecreaseRepeatButton>
+                <Track.Thumb>
+                    <Thumb Focusable="False">
+                        <Thumb.Template>
+                            <ControlTemplate TargetType="Thumb">
+                                <Border Background="Transparent" />
+                            </ControlTemplate>
+                        </Thumb.Template>
+                    </Thumb>
+                </Track.Thumb>
+                <Track.IncreaseRepeatButton>
+                    <RepeatButton Style="{StaticResource ScrollPageButton}" Command="{x:Static ScrollBar.PageDownCommand}"
+                                  CommandTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}" />
+                </Track.IncreaseRepeatButton>
+            </local:NativeGlassScrollTrack>
+        </Border>
+    </ControlTemplate>
+
+    <Style x:Key="GlassVerticalScrollViewer" TargetType="ScrollViewer">
+        <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollViewer">
+                    <Grid Background="{TemplateBinding Background}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition />
+                            <!-- Reserve the hit area so categories and hover states share the same field alignment. -->
+                            <ColumnDefinition Width="16" />
+                        </Grid.ColumnDefinitions>
+                        <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" Margin="{TemplateBinding Padding}"
+                                                CanContentScroll="{TemplateBinding CanContentScroll}" />
+                        <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1" Orientation="Vertical"
+                                   Width="Auto" MinWidth="0" HorizontalAlignment="Stretch" Focusable="False" Template="{StaticResource GlassScrollBar}"
+                                   Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"
+                                   Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}"
+                                   Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <ControlTemplate x:Key="GlassScrollList" TargetType="ListBox">
+        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{DynamicResource ControlCornerRadius}">
+            <ScrollViewer Style="{StaticResource GlassVerticalScrollViewer}" Padding="{TemplateBinding Padding}"
+                          Focusable="False" CanContentScroll="True" VerticalScrollBarVisibility="Auto" PanningMode="VerticalOnly">
+                <ItemsPresenter />
+            </ScrollViewer>
+        </Border>
+    </ControlTemplate>
+
     <Style x:Key="NativeAction" TargetType="{x:Type local:NativeGlassButton}">
         <Setter Property="OverridesDefaultStyle" Value="True" />
         <Setter Property="MinWidth" Value="64" />

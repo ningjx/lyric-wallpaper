@@ -7,6 +7,7 @@ using Media = System.Windows.Media;
 using Motion = System.Windows.Media.Animation;
 using Fluent = Wpf.Ui.Controls;
 using LyricWallpaper.Platform.Windows;
+using LyricWallpaper.Playback;
 using LyricWallpaper.Scene;
 using LyricWallpaper.Storage;
 using LyricWallpaper.Wallpaper;
@@ -36,14 +37,15 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
     private readonly Dictionary<int, W.FrameworkElement> pages = new();
     private readonly NativeGlassSelector nav = new(navigation: true);
     private readonly NativeGlassScene glassScene;
-    private readonly Ui.Grid page = new() { Margin = new W.Thickness(0, 0, 12, 0) };
+    private readonly Ui.Grid page = new();
     private readonly Ui.ScrollViewer pageScroll = new()
     {
         VerticalScrollBarVisibility = Ui.ScrollBarVisibility.Auto,
         HorizontalScrollBarVisibility = Ui.ScrollBarVisibility.Disabled,
         PanningMode = Ui.PanningMode.VerticalOnly
     };
-    private readonly Ui.TextBlock status = new();
+    private readonly PlaybackStatusCard playbackCard = new();
+    private readonly Ui.TextBlock testNotice = new() { Text = "测试滚动中", Visibility = W.Visibility.Collapsed };
     private readonly Ui.TextBlock errorNotice = new() { Visibility = W.Visibility.Collapsed };
     private readonly NativeGlassSwitch testToggle = new() { Content = "测试滚动" };
     private readonly NativeGlassSwitch startupToggle = new() { Content = "开机自启", IsEnabled = false };
@@ -60,7 +62,8 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
     public bool IsClosed { get; private set; }
 
     public SettingsWindow(WallpaperStore wallpaperStore, PlaybackSettingsStore playbackStore, WallpaperSettings wallpaper,
-        Func<WallpaperSettings, Task> applyWallpaper, Action restartWorker, Action<bool> setTestMode, Action<bool> setStartup)
+        Func<WallpaperSettings, Task> applyWallpaper, Func<PlaybackSnapshot?> readPlayback, Action restartWorker,
+        Action<bool> setTestMode, Action<bool> setStartup)
     {
         this.wallpaperStore = wallpaperStore;
         this.playbackStore = playbackStore;
@@ -121,14 +124,30 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
             ApplyService();
         };
         glassScene = new(this, MakeLayout());
-        Closed += (_, _) => IsClosed = true;
+        var statusTimer = new W.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        statusTimer.Tick += (_, _) => playbackCard.Update(readPlayback());
+        void SyncStatusTimer()
+        {
+            if (IsVisible && WindowState != W.WindowState.Minimized)
+            {
+                playbackCard.Update(readPlayback());
+                statusTimer.Start();
+            }
+            else statusTimer.Stop();
+        }
+        IsVisibleChanged += (_, _) => SyncStatusTimer();
+        StateChanged += (_, _) => SyncStatusTimer();
+        Closed += (_, _) => { IsClosed = true; statusTimer.Stop(); };
         nav.SelectedIndex = 0;
     }
 
     public void InvalidateGlass() => glassScene?.Invalidate();
 
-    public void SetStatus(string text) => status.Text = text;
-    public void SetTestMode(bool enabled) => testToggle.IsChecked = enabled;
+    public void SetTestMode(bool enabled)
+    {
+        testToggle.IsChecked = enabled;
+        testNotice.Visibility = enabled ? W.Visibility.Visible : W.Visibility.Collapsed;
+    }
 
     public void SetStartup(bool? enabled)
     {
@@ -157,12 +176,9 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
     private W.FrameworkElement MakeLayout()
     {
         var root = new Ui.DockPanel { Background = Media.Brushes.Transparent };
-        status.Foreground = muted;
-        status.VerticalAlignment = W.VerticalAlignment.Center;
-        status.Margin = new W.Thickness(12, 0, 0, 0);
-        status.MaxWidth = 210;
-        status.TextTrimming = W.TextTrimming.CharacterEllipsis;
-        var header = new Fluent.TitleBar { Title = Title, TrailingContent = status, Height = 38 };
+        testNotice.Foreground = muted;
+        testNotice.VerticalAlignment = W.VerticalAlignment.Center;
+        var header = new Fluent.TitleBar { Title = Title, TrailingContent = testNotice, Height = 38 };
         Ui.DockPanel.SetDock(header, Ui.Dock.Top);
         root.Children.Add(header);
 
@@ -180,8 +196,17 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
         }
         W.Automation.AutomationProperties.SetName(nav, "设置分类");
         nav.SelectionChanged += (_, _) => SwitchCategory();
-        Ui.DockPanel.SetDock(nav, Ui.Dock.Left);
-        root.Children.Add(nav);
+        var sidebar = new Ui.Grid { Width = 156 };
+        sidebar.RowDefinitions.Add(new() { Height = W.GridLength.Auto });
+        sidebar.RowDefinitions.Add(new());
+        sidebar.Children.Add(nav);
+        const double cardEdgeInset = 10;
+        playbackCard.Margin = new W.Thickness(cardEdgeInset, 8, 0, cardEdgeInset);
+        playbackCard.VerticalAlignment = W.VerticalAlignment.Bottom;
+        Ui.Grid.SetRow(playbackCard, 1);
+        sidebar.Children.Add(playbackCard);
+        Ui.DockPanel.SetDock(sidebar, Ui.Dock.Left);
+        root.Children.Add(sidebar);
 
         var section = new Ui.DockPanel { Margin = new W.Thickness(23, 10, 23, 15) };
         errorNotice.Foreground = error;
@@ -190,6 +215,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
         Ui.DockPanel.SetDock(errorNotice, Ui.Dock.Bottom);
         section.Children.Add(errorNotice);
 
+        pageScroll.Style = (W.Style)FindResource("GlassVerticalScrollViewer");
         pageScroll.Content = page;
         section.Children.Add(pageScroll);
         root.Children.Add(section);
@@ -584,6 +610,7 @@ internal sealed class SettingsWindow : Fluent.FluentWindow, INativeGlassHost
         var retries = ServiceNumber(grid, "网络重试次数", network, "retries", 3, 0, 10, 1);
 
         var list = new Ui.ListBox { MinHeight = 95, MaxHeight = 150, Padding = new W.Thickness(4), Background = Media.Brushes.Transparent };
+        list.Template = (Ui.ControlTemplate)FindResource("GlassScrollList");
         list.BorderBrush = line;
         list.BorderThickness = new W.Thickness(1);
         var known = new Dictionary<string, string> { ["local-file"] = "本地歌词", ["netease"] = "网易云音乐", ["qq"] = "QQ 音乐" };

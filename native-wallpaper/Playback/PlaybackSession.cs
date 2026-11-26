@@ -14,6 +14,7 @@ internal sealed class PlaybackSession(ServiceOptions options, LyricResolver reso
     private readonly HashSet<Task> queries = new();
     private PlaybackQuery? query;
     private PlaybackTrack track = EmptyTrack;
+    private LyricActivity lyrics;
     private PlaybackSnapshot? last;
 
     public async Task RunAsync(string configPath)
@@ -65,12 +66,14 @@ internal sealed class PlaybackSession(ServiceOptions options, LyricResolver reso
     private void Refresh()
     {
         long now = Stopwatch.GetTimestamp();
-        var selected = arbiter.Pick(now);
-        if (selected is null || selected.Song != track.Song || selected.Author != track.Author)
+        var observation = arbiter.Pick(now);
+        var selected = observation?.Snapshot;
+        if (selected is null ? track != EmptyTrack : selected.Song != track.Song || selected.Author != track.Author)
         {
             if (query is not null) _ = query.Cancellation.CancelAsync();
             query = null;
             track = selected is null ? EmptyTrack : new(selected.Song, selected.Author, "", "");
+            lyrics = selected is null ? LyricActivity.Idle : LyricActivity.Searching;
             if (selected is not null && !stop.IsCancellationRequested)
             {
                 var lookup = new PlaybackQuery(CancellationTokenSource.CreateLinkedTokenSource(stop));
@@ -85,8 +88,13 @@ internal sealed class PlaybackSession(ServiceOptions options, LyricResolver reso
         }
         double position = Math.Round(Math.Max(0, selected?.Position ?? 0), 3);
         bool playing = selected?.Playing ?? false;
-        if (last is not null && ReferenceEquals(last.Track, track) && last.Position == position && last.Playing == playing) return;
-        last = new(selected is not null, playing, position, track, now);
+        bool samePosition = last is not null && last.Source == observation?.Source && last.Position == position &&
+            last.Playing == playing && last.Track.Song == track.Song && last.Track.Author == track.Author;
+        if (samePosition && ReferenceEquals(last!.Track, track) && last.Duration == selected?.Duration && last.Lyrics == lyrics) return;
+        // Changes to lyrics or duration must not restart the playback clock between player samples.
+        long receivedAt = samePosition ? last!.ReceivedAt : observation?.Observed ?? now;
+        last = new(observation?.Source, playing, position, selected?.Duration, track, receivedAt, lyrics,
+            options.Music.EnableApple || options.Music.EnableNetease);
         publish(last);
     }
 
@@ -97,18 +105,29 @@ internal sealed class PlaybackSession(ServiceOptions options, LyricResolver reso
         {
             for (int attempt = 0; ; attempt++)
             {
-                var result = await resolver.ResolveAsync(selected.Song, selected.Author, cancellation, PublishLyrics);
+                if (attempt > 0) SetActivity(LyricActivity.Searching);
+                var result = await resolver.ResolveAsync(selected.Song, selected.Author, cancellation, PublishLyrics,
+                    () => SetActivity(LyricActivity.Downloading));
                 if (result is not null)
                 {
                     PublishLyrics(result);
                     return;
                 }
-                if (attempt == 3) return;
+                if (attempt == 3)
+                {
+                    SetActivity(LyricActivity.Unavailable);
+                    return;
+                }
+                SetActivity(LyricActivity.WaitingToRetry);
                 await Task.Delay(resolver.MissRetryDelay * (1 << attempt), cancellation);
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
-        catch (Exception ex) { log($"歌词解析失败（{selected.Song} - {selected.Author}）：{ex.Message}"); }
+        catch (Exception ex)
+        {
+            SetActivity(LyricActivity.Failed);
+            log($"歌词解析失败（{selected.Song} - {selected.Author}）：{ex.Message}");
+        }
         finally
         {
             lock (gate)
@@ -118,12 +137,24 @@ internal sealed class PlaybackSession(ServiceOptions options, LyricResolver reso
             }
         }
 
+        void SetActivity(LyricActivity next)
+        {
+            lock (gate)
+            {
+                if (cancellation.IsCancellationRequested || !ReferenceEquals(query, lookup) ||
+                    lyrics == next || lyrics == LyricActivity.Ready) return;
+                lyrics = next;
+                Refresh();
+            }
+        }
+
         void PublishLyrics(LyricsResult result)
         {
             lock (gate)
             {
                 if (cancellation.IsCancellationRequested || !ReferenceEquals(query, lookup) ||
                     (track.Lyrics == result.Lrc && track.Translation == result.TranslatedLyric)) return;
+                lyrics = LyricActivity.Ready;
                 track = new(selected.Song, selected.Author, result.Lrc, result.TranslatedLyric);
                 Refresh();
             }

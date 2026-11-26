@@ -21,10 +21,10 @@ internal sealed class PlaybackArbiter(string[] priority, TimeSpan maxAge)
                 Math.Round(before, 1) == Math.Round(after, 1)))
             transition = previous.Transition;
         int rank = Array.IndexOf(priority, source);
-        observations[source] = new(snapshot, now, transition, rank < 0 ? 1 : rank);
+        observations[source] = new(source, snapshot, now, transition, rank < 0 ? 1 : rank);
     }
 
-    public PlayerSnapshot? Pick(long now)
+    public Observation? Pick(long now)
     {
         Observation? best = null;
         foreach (var candidate in observations.Values)
@@ -36,8 +36,8 @@ internal sealed class PlaybackArbiter(string[] priority, TimeSpan maxAge)
                         || (candidate.Transition == best.Transition && candidate.Priority < best.Priority))))
                 best = candidate;
         }
-        return best?.Snapshot;
+        return best;
     }
 
-    private sealed record Observation(PlayerSnapshot Snapshot, long Observed, long Transition, int Priority);
+    internal sealed record Observation(string Source, PlayerSnapshot Snapshot, long Observed, long Transition, int Priority);
 }

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using LyricWallpaper.Playback;
@@ -48,7 +47,7 @@ internal sealed partial class LyricTimeline
             Pauses++;
             snap = true;
         }
-        if (!newSong && previous is not null && Math.Abs(next.Position - PositionAt(previous)) > .75)
+        if (!newSong && previous is not null && next.ReceivedAt != previous.ReceivedAt && Math.Abs(next.Position - previous.CurrentPosition) > .75)
         {
             Seeks++;
             snap = true;
@@ -64,7 +63,7 @@ internal sealed partial class LyricTimeline
             return new LyricFrame([], 0, false, double.PositiveInfinity, Idle: true);
         }
 
-        double position = PositionAt(sample) + settings.OffsetMs / 1000d + (sample.Playing ? lead : 0);
+        double position = sample.CurrentPosition + settings.OffsetMs / 1000d + (sample.Playing ? lead : 0);
         int line = FindLine(song, position);
         if (snap || !sample.Playing)
         {
@@ -91,9 +90,6 @@ internal sealed partial class LyricTimeline
         if (elapsed >= lead || transitionFrom == target) return target;
         return target + (transitionFrom - target) * (1 + speed * elapsed) * Math.Exp(-speed * elapsed);
     }
-
-    private static double PositionAt(PlaybackSnapshot current) =>
-        Math.Max(0, current.Position + (current.Playing ? Stopwatch.GetElapsedTime(current.ReceivedAt).TotalSeconds : 0));
 
     private static int FindLine(LyricLine[] lines, double position)
     {

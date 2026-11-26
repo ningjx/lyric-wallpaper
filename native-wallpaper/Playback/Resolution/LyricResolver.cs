@@ -25,7 +25,7 @@ internal sealed class LyricResolver(ServiceOptions options, LyricHttp http, Acti
         ServiceOptions.Seconds(options.Netease.SearchNegativeTtl, .05, 86400, 15));
 
     public async Task<LyricsResult?> ResolveAsync(string title, string artist, CancellationToken stop,
-        Action<LyricsResult>? onAvailable = null)
+        Action<LyricsResult>? onAvailable = null, Action? onDownload = null)
     {
         SongKey song = SongKey.Normalize(title, artist);
         if (cache.Get(song) is { } previous) return previous;
@@ -98,8 +98,8 @@ internal sealed class LyricResolver(ServiceOptions options, LyricHttp http, Acti
                 return vendor switch
                 {
                     Local => await ReadLocalAsync(title, artist, netease, cancellation, onNamedFile),
-                    Netease => await ReadNeteaseAsync(await netease.Value, artist, cancellation),
-                    _ => await ReadQQAsync(await SearchAsync(QQ, title, artist, song, cancellation), artist, cancellation)
+                    Netease => await ReadNeteaseAsync(await netease.Value, artist, cancellation, onDownload),
+                    _ => await ReadQQAsync(await SearchAsync(QQ, title, artist, song, cancellation), artist, cancellation, onDownload)
                 };
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return null; }
@@ -217,10 +217,11 @@ internal sealed class LyricResolver(ServiceOptions options, LyricHttp http, Acti
         return best;
     }
 
-    private async Task<LyricsResult?> ReadNeteaseAsync(Match? match, string artist, CancellationToken stop)
+    private async Task<LyricsResult?> ReadNeteaseAsync(Match? match, string artist, CancellationToken stop, Action? onDownload)
     {
         if (match is null || match.Similarity < SongSimilarity.Threshold(artist)) return null;
         string id = match.Id;
+        onDownload?.Invoke();
         var response = await GetAsync(NeteaseReferer + "api/song/lyric",
             new() { ["id"] = id, ["lv"] = "-1", ["kv"] = "-1", ["tv"] = "-1" },
             NeteaseReferer, "lyric:netease-public:" + id, stop);
@@ -242,9 +243,10 @@ internal sealed class LyricResolver(ServiceOptions options, LyricHttp http, Acti
         }
     }
 
-    private async Task<LyricsResult?> ReadQQAsync(Match? match, string artist, CancellationToken stop)
+    private async Task<LyricsResult?> ReadQQAsync(Match? match, string artist, CancellationToken stop, Action? onDownload)
     {
         if (match is null || match.Similarity < SongSimilarity.Threshold(artist)) return null;
+        onDownload?.Invoke();
         var response = await GetAsync("https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg", new()
         {
             ["musicid"] = match.Id, ["g_tk"] = "5381", ["loginUin"] = "0", ["hostUin"] = "0", ["format"] = "json",

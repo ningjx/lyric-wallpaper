@@ -57,6 +57,11 @@ internal sealed class LyricsService : IDisposable
             catch (Exception ex)
             {
                 Log(ex.ToString());
+                lock (gate)
+                {
+                    Volatile.Write(ref latest, null);
+                    Updated.Set();
+                }
                 await Task.Delay(TimeSpan.FromSeconds(2), stop).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
             }
             finally
