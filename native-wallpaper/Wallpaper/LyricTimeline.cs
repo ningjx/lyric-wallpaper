@@ -11,9 +11,7 @@ internal sealed partial class LyricTimeline
 {
     private PlaybackSnapshot? sample;
     private LyricLine[] song = [];
-    private int target = -1;
-    private double transitionAt, transitionFrom, pauseAt;
-    private bool snap = true;
+    private double pauseAt;
 
     public int Songs { get; private set; }
     public int LoadedLyrics { get; private set; }
@@ -28,7 +26,6 @@ internal sealed partial class LyricTimeline
         if (next?.HasSong != true)
         {
             song = [];
-            snap = true;
             return;
         }
 
@@ -39,56 +36,44 @@ internal sealed partial class LyricTimeline
             song = ParseTrack(next.Track);
             if (newSong) Songs++;
             if (song.Length > 1) LoadedLyrics++;
-            snap = true;
         }
         if (!next.Playing && (newSong || previous?.Playing == true))
         {
             pauseAt = now;
             Pauses++;
-            snap = true;
         }
         if (!newSong && previous is not null && next.ReceivedAt != previous.ReceivedAt && Math.Abs(next.Position - previous.CurrentPosition) > .75)
-        {
             Seeks++;
-            snap = true;
-        }
     }
 
     public LyricFrame At(double now, double lead, WallpaperSettings settings)
     {
         int idleDelay = settings.IdleSeconds;
         if (sample?.HasSong != true || (!sample.Playing && now >= pauseAt + idleDelay))
-        {
-            snap = true;
             return new LyricFrame([], 0, false, double.PositiveInfinity, Idle: true);
-        }
 
-        double position = sample.CurrentPosition + settings.OffsetMs / 1000d + (sample.Playing ? lead : 0);
-        int line = FindLine(song, position);
-        if (snap || !sample.Playing)
-        {
-            target = line;
-            transitionFrom = line;
-            snap = false;
-        }
-        else if (target != line)
-        {
-            transitionFrom = Focus(now, lead, settings.ScrollSpeed);
-            transitionAt = now;
-            target = line;
-        }
-        double focus = Focus(now, lead, settings.ScrollSpeed);
-        double next = sample.Playing
-            ? line + 1 < song.Length ? now + Math.Max(.001, song[line + 1].Time - position) : double.PositiveInfinity
-            : pauseAt + idleDelay;
-        return new LyricFrame(song, focus, focus != target, next);
+        double position = sample.CurrentPosition + settings.OffsetMs / 1000d;
+        return sample.Playing ? PlayingAt(song, position, now, lead, settings.ScrollSpeed)
+            : new(song, FindLine(song, position), false, pauseAt + idleDelay);
     }
 
-    private double Focus(double now, double lead, double speed)
+    internal static LyricFrame PlayingAt(LyricLine[] lines, double position, double now, double lead, double speed)
     {
-        double elapsed = now - transitionAt;
-        if (elapsed >= lead || transitionFrom == target) return target;
-        return target + (transitionFrom - target) * (1 + speed * elapsed) * Math.Exp(-speed * elapsed);
+        int line = FindLine(lines, position);
+        if (line + 1 >= lines.Length) return new(lines, line, false, double.PositiveInfinity);
+
+        // Arrive on the next cue, but never start before the current cue.
+        double end = lines[line + 1].Time;
+        double start = Math.Max(lines[line].Time, end - lead);
+        if (position < start) return new(lines, line, false, now + (start - position));
+
+        // LRC can assign several rows the same timestamp. Land on the same row FindLine will select.
+        int target = line + 2 < lines.Length && lines[line + 2].Time == end ? FindLine(lines, end) : line + 1;
+        double phase = (position - start) / (end - start);
+        double progress = Step(phase * lead * speed) / Step(lead * speed);
+        return new(lines, line + (target - line) * progress, true, now + (end - position));
+
+        static double Step(double t) => 1 - (1 + t) * Math.Exp(-t);
     }
 
     private static int FindLine(LyricLine[] lines, double position)

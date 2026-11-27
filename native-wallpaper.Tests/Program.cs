@@ -273,6 +273,22 @@ try
     Require(!frame.Idle && frame.Lines.Any(line => line.Translation == "译文") &&
         timeline.At(31, .1, new WallpaperSettings()).Idle, "lyrics timeline keeps translation and idle transitions");
 
+    LyricLine[] fastLyrics = [new(double.NegativeInfinity, "歌名"), new(10, "一"), new(10.25, "二"),
+        new(10.5, "三"), new(16, "四"), new(16, "五")];
+    LyricFrame RollingAt(double playhead) => LyricTimeline.PlayingAt(fastLyrics, playhead, now: 100, lead: 2, speed: 5.5);
+    Require(RollingAt(10).Focus == 1 && RollingAt(10.125) is { Moving: true, Focus: > 1 and < 2 } &&
+        RollingAt(10.25).Focus == 2 && RollingAt(10.375) is { Moving: true, Focus: > 2 and < 3 } &&
+        RollingAt(10.5).Focus == 3, "250 ms lyrics each scroll through the center with a two-second animation setting");
+    Require(RollingAt(11) is { Focus: 3, Moving: false, Next: 103 } &&
+        RollingAt(14) is { Focus: 3, Moving: true } && RollingAt(15.99).Focus is > 4.99 and < 5 &&
+        RollingAt(16) is { Focus: 5, Moving: false, Next: double.PositiveInfinity },
+        "long gaps wake at the start of the roll and simultaneous last cues settle without a jump");
+    var slowScroll = new WallpaperSettings { ScrollSpeed = 2, OffsetMs = 250 };
+    var beforeLoop = LyricLayer.TestAt(26.74, 4, slowScroll);
+    var loopStart = LyricLayer.TestAt(26.75, 4, slowScroll);
+    Require(beforeLoop.Moving && beforeLoop.Focus is > 23.99 and < 24 && loopStart.Focus == 12 &&
+        beforeLoop.Lines[24].Text == loopStart.Lines[12].Text, "slow test scrolling meets the offset cue across a loop");
+
     LyricLine[] mixedLyrics = [new(0, "第一句"), new(10, "第二句"), new(20, "第三句", "译文"), new(30, "第四句", "译文")];
     var lyricViewport = new SceneViewport(1440, 810, display);
     var lyricText = new LyricTestText();

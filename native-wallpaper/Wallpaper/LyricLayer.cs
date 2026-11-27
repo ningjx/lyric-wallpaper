@@ -50,26 +50,19 @@ internal static class LyricLayer
             "Keep the words we never said", "Carry them to the horizon", "A second of quiet",
             "Moonlight rests on a shoulder", "Follow your gaze into the distance", "Until the sky grows bright"
         ];
-        var sequence = Lines.Select((text, i) =>
-            new LyricLine(i * TestInterval,
-                i == 3 ? "让时间慢慢流成光 · 测试滚动" : text, captions[i])).ToArray();
-        // Duplicate the neighboring rows so they stay in place when the test loops.
-        return [.. sequence, .. sequence, .. sequence];
+        // The middle copy plays on a continuous time axis, with neighboring rows across the loop.
+        return Enumerable.Range(0, Lines.Length * 3).Select(i =>
+        {
+            int line = i % Lines.Length;
+            return new LyricLine(i * TestInterval, line == 3 ? "让时间慢慢流成光 · 测试滚动" : Lines[line], captions[line]);
+        }).ToArray();
     }
 
     public static LyricFrame TestAt(double elapsed, double lead, WallpaperSettings settings)
     {
         double period = Lines.Length * TestInterval;
-        double phase = (elapsed + TestInterval * 3 + lead + settings.OffsetMs / 1000d) % period;
-        int line = (int)(phase / TestInterval);
-        double since = phase - line * TestInterval;
-        double duration = Math.Min(TestInterval, lead);
-        int active = Lines.Length + line;
-        if (since >= duration)
-            return new(TestLines, active, false, elapsed + TestInterval - since);
-        double speed = settings.ScrollSpeed;
-        double Step(double time) => 1 - (1 + speed * time) * Math.Exp(-speed * time);
-        return new(TestLines, active - 1 + Step(since) / Step(duration), true, elapsed + TestInterval - since);
+        double phase = (elapsed + TestInterval * 3 + settings.OffsetMs / 1000d) % period;
+        return LyricTimeline.PlayingAt(TestLines, period + phase, elapsed, lead, settings.ScrollSpeed);
     }
 
     public static TextColorSample? ColorSample(LyricFrame frame, bool automatic, GlassCard? center,
