@@ -1,6 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-using Automation = System.Windows.Automation;
+using Accessibility;
 using LyricWallpaper.Scene;
 
 namespace LyricWallpaper.Platform.Windows;
@@ -139,24 +139,44 @@ internal sealed class WidgetInputWindow : NativeWindow, IDisposable
 
     private static Rectangle[]? ReadIconBounds(nint iconList)
     {
+        IAccessible? owner = null;
+        object[] children = [];
         try
         {
-            var owner = Automation.AutomationElement.FromHandle(iconList);
-            var cache = new Automation.CacheRequest();
-            cache.Add(Automation.AutomationElement.BoundingRectangleProperty);
-            using (cache.Activate())
-                return owner.FindAll(Automation.TreeScope.Children, new Automation.PropertyCondition(
-                    Automation.AutomationElement.ControlTypeProperty, Automation.ControlType.ListItem))
-                    .Cast<Automation.AutomationElement>()
-                    .Select(item => item.Cached.BoundingRectangle)
-                    .Where(rect => !rect.IsEmpty && rect.Width > 0 && rect.Height > 0)
-                    .Select(rect => Rectangle.FromLTRB((int)Math.Floor(rect.Left), (int)Math.Floor(rect.Top),
-                        (int)Math.Ceiling(rect.Right), (int)Math.Ceiling(rect.Bottom))).ToArray();
+            // Poll the native list directly. Repeated UI Automation tree walks retain a
+            // client-side ListViewItem proxy and its native peer for each icon on every poll.
+            const uint ObjIdClient = 0xFFFFFFFC;
+            var iid = typeof(IAccessible).GUID;
+            if (AccessibleObjectFromWindow(iconList, ObjIdClient, in iid, out owner) < 0 || owner is null) return null;
+            int count = owner.accChildCount;
+            if (count == 0) return [];
+            children = new object[count];
+            if (AccessibleChildren(owner, 0, count, children, out int obtained) < 0) return null;
+            var bounds = new List<Rectangle>(obtained);
+            for (int i = 0; i < obtained; i++)
+            {
+                // MSAA returns either a child ID on the container or a separate child object.
+                var item = owner;
+                int id = 0; // CHILDID_SELF
+                if (children[i] is int childId) id = childId;
+                else if (children[i] is IAccessible accessible) item = accessible;
+                else return null;
+                if (item.get_accRole(id) is not (int)AccessibleRole.ListItem) continue;
+                item.accLocation(out int x, out int y, out int width, out int height, id);
+                if (width > 0 && height > 0) bounds.Add(new(x, y, width, height));
+            }
+            return bounds.ToArray();
         }
-        catch (Exception ex) when (ex is Automation.ElementNotAvailableException or COMException or InvalidOperationException
-            or Win32Exception or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is COMException or ArgumentException or InvalidOperationException or
+            InvalidCastException or NotImplementedException or UnauthorizedAccessException)
         {
             return null;
+        }
+        finally
+        {
+            foreach (var child in children)
+                if (child is not null && Marshal.IsComObject(child)) Marshal.ReleaseComObject(child);
+            if (owner is not null) Marshal.ReleaseComObject(owner);
         }
     }
 
@@ -212,6 +232,11 @@ internal sealed class WidgetInputWindow : NativeWindow, IDisposable
         DestroyHandle();
     }
 
+    [DllImport("oleacc.dll")] private static extern int AccessibleObjectFromWindow(nint window, uint objectId,
+        in Guid iid, [MarshalAs(UnmanagedType.Interface)] out IAccessible? accessible);
+    [DllImport("oleacc.dll")] private static extern int AccessibleChildren(IAccessible container, int start, int count,
+        [Out, MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.Struct, SizeParamIndex = 2)] object[] children,
+        out int obtained);
     [DllImport("user32.dll")] private static extern nint GetParent(nint window);
     [DllImport("user32.dll")] private static extern nint SetParent(nint window, nint newParent);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int SetWindowLong(nint window, int index, int value);
